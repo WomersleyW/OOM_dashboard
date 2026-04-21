@@ -63,8 +63,8 @@ def build_dataframes(orders):
 
 def highlight_total(df):
     styles = pd.DataFrame("", index=df.index, columns=df.columns)
-    styles.iloc[-1, :] = "font-weight: bold; background-color: #f0f0f0"
-    styles.iloc[:, -1] = "font-weight: bold; background-color: #f0f0f0"
+    styles.iloc[-1, :] = "font-weight: bold; background-color: #1565C0; color: white"
+    styles.iloc[:, -1] = "font-weight: bold; background-color: #1565C0; color: white"
     return styles
 
 
