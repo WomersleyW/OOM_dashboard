@@ -133,7 +133,7 @@ def render_zero_orders(orders):
 tab1, tab2, tab3 = st.tabs([
     f"Standard orders ({len(normal_orders)})",
     f"Faire ({len(faire_orders)})",
-    f"Zero-value ({len(zero_orders)})",
+    f"Samples ({len(zero_orders)})",
 ])
 
 with tab1:
@@ -144,3 +144,4 @@ with tab2:
 
 with tab3:
     render_zero_orders(zero_orders)
+
