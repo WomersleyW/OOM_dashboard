@@ -178,6 +178,19 @@ def _normalise_product(title: str) -> Optional[str]:
     return None  # skip one-off / custom line items
 
 
+def classify_orders(orders: List[Dict]):
+    """Split orders into (normal, faire, zero) buckets."""
+    normal, faire, zero = [], [], []
+    for o in orders:
+        if float(o.get("total_price", 0)) == 0:
+            zero.append(o)
+        elif o.get("source_name", "").lower() == "faire":
+            faire.append(o)
+        else:
+            normal.append(o)
+    return normal, faire, zero
+
+
 def sales_by_product_by_month(orders: List[Dict]) -> Dict[str, Dict[str, Dict]]:
     """
     Returns {product_title: {YYYY-MM: {units: int, revenue: float}}}.
