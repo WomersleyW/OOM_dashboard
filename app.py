@@ -101,10 +101,9 @@ def render_tables(orders, currency="GBP"):
     st.subheader("Monthly revenue trend")
     data = sales_by_product_by_month(orders)
     months = sorted({m for p in data.values() for m in p})
-    month_labels = [datetime.strptime(m, "%Y-%m").strftime("%b %Y") for m in months]
     chart_data = pd.DataFrame(
         {p: [data[p][m]["revenue"] for m in months] for p in sorted(data)},
-        index=month_labels,
+        index=pd.to_datetime(months),
     )
     st.bar_chart(chart_data, use_container_width=True)
 
@@ -144,7 +143,7 @@ def render_zero_orders(orders):
         )
         chart_df = pd.DataFrame(
             {"Cans": [monthly_cans[m] for m in all_months]},
-            index=all_months,
+            index=pd.to_datetime([datetime.strptime(m, "%b %Y") for m in all_months]),
         )
         st.bar_chart(chart_df, use_container_width=True)
 
