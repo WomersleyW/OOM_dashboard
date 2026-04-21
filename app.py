@@ -2,6 +2,7 @@
 OOM Dashboard — Streamlit app
 """
 
+import os
 import pandas as pd
 import streamlit as st
 from shopify import ShopifyClient, sales_by_product_by_month
@@ -11,16 +12,21 @@ st.set_page_config(page_title="OOM Dashboard", page_icon="🥤", layout="wide")
 
 st.title("🥤 OOM Sales Dashboard")
 
+# ── Credentials: st.secrets (Streamlit Cloud) with fallback to .env ───────────
+
+store_url = st.secrets.get("SHOPIFY_STORE_URL", os.getenv("SHOPIFY_STORE_URL", ""))
+access_token = st.secrets.get("SHOPIFY_ACCESS_TOKEN", os.getenv("SHOPIFY_ACCESS_TOKEN", ""))
+
 # ── Data loading ──────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=300)
-def load_data():
-    client = ShopifyClient()
+def load_data(_store_url, _access_token):
+    client = ShopifyClient(store_url=_store_url, access_token=_access_token)
     orders = client.get_all_orders(financial_status="paid")
     return orders
 
 with st.spinner("Fetching orders from Shopify…"):
-    orders = load_data()
+    orders = load_data(store_url, access_token)
 
 st.caption(f"{len(orders)} paid orders loaded  ·  refreshes every 5 minutes")
 
