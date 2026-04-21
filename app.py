@@ -114,18 +114,53 @@ def render_zero_orders(orders):
         st.info("No zero-value orders.")
         return
 
+    # ── Monthly sample can totals ─────────────────────────────────────────────
+    monthly_cans: dict = {}
+    for o in orders:
+        month = datetime.strptime(o["created_at"][:7], "%Y-%m").strftime("%b %Y")
+        for item in o.get("line_items", []):
+            title = item["title"].strip()
+            if title and title[0] in ("3", "6") and (len(title) == 1 or not title[1].isdigit()):
+                cans = int(title[0]) * item["quantity"]
+                monthly_cans[month] = monthly_cans.get(month, 0) + cans
+
+    if monthly_cans:
+        st.subheader("Sample cans distributed by month")
+        all_months = sorted(
+            monthly_cans.keys(),
+            key=lambda m: datetime.strptime(m, "%b %Y")
+        )
+        df_cans = pd.DataFrame(
+            {"Cans": [monthly_cans[m] for m in all_months]},
+            index=all_months,
+        ).T
+        df_cans["Total"] = df_cans.sum(axis=1)
+        st.dataframe(
+            df_cans.style
+                .format("{:.0f}")
+                .background_gradient(cmap="Oranges", subset=all_months),
+            use_container_width=True,
+            height=100,
+        )
+        chart_df = pd.DataFrame(
+            {"Cans": [monthly_cans[m] for m in all_months]},
+            index=all_months,
+        )
+        st.bar_chart(chart_df, use_container_width=True)
+
+    st.subheader("All sample orders")
     rows = []
     for o in sorted(orders, key=lambda x: x["created_at"], reverse=True):
         rows.append({
-            "Order #":    f"#{o['order_number']}",
-            "Date":       o["created_at"][:10],
-            "Source":     o.get("source_name", ""),
-            "Tags":       o.get("tags", ""),
-            "Items":      ", ".join(f"{i['title']} x{i['quantity']}" for i in o.get("line_items", [])),
-            "Financial":  o.get("financial_status", ""),
+            "Order #":   f"#{o['order_number']}",
+            "Date":      o["created_at"][:10],
+            "Source":    o.get("source_name", ""),
+            "Tags":      o.get("tags", ""),
+            "Items":     ", ".join(f"{i['title']} x{i['quantity']}" for i in o.get("line_items", [])),
+            "Financial": o.get("financial_status", ""),
         })
 
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, height=500)
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, height=400)
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
