@@ -10,7 +10,7 @@ from urllib.parse import urlencode
 AUTH_URL  = "https://login.xero.com/identity/connect/authorize"
 TOKEN_URL = "https://identity.xero.com/connect/token"
 API_BASE  = "https://api.xero.com/api.xro/2.0"
-SCOPES = "openid profile email offline_access accounting.transactions.read accounting.reports.read accounting.settings.read"
+SCOPES = "openid profile email offline_access accounting.transactions.read"
 
 
 class XeroClient:
