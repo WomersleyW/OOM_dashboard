@@ -6,6 +6,7 @@ import os
 import pandas as pd
 import streamlit as st
 from shopify import ShopifyClient, sales_by_product_by_month, classify_orders
+from xero import XeroClient
 from datetime import datetime
 
 st.set_page_config(page_title="OOM Dashboard", page_icon="🥤", layout="wide")
@@ -162,12 +163,104 @@ def render_zero_orders(orders):
     st.dataframe(pd.DataFrame(rows), use_container_width=True, height=400)
 
 
+# ── Xero OAuth + rendering ────────────────────────────────────────────────────
+
+XERO_CLIENT_ID     = st.secrets.get("XERO_CLIENT_ID",     os.getenv("XERO_CLIENT_ID", ""))
+XERO_CLIENT_SECRET = st.secrets.get("XERO_CLIENT_SECRET", os.getenv("XERO_CLIENT_SECRET", ""))
+XERO_REDIRECT_URI  = st.secrets.get("XERO_REDIRECT_URI",  os.getenv("XERO_REDIRECT_URI", "http://localhost:8502"))
+
+xero = XeroClient(XERO_CLIENT_ID, XERO_CLIENT_SECRET, XERO_REDIRECT_URI)
+
+# Restore tokens from session state if available
+if "xero_access_token" in st.session_state:
+    xero.load_tokens(
+        st.session_state["xero_access_token"],
+        st.session_state["xero_refresh_token"],
+        st.session_state["xero_token_expiry"],
+        st.session_state["xero_tenant_id"],
+    )
+
+# Handle OAuth callback — Xero redirects back with ?code=...
+params = st.query_params
+if "code" in params and not xero.is_authenticated():
+    with st.spinner("Connecting to Xero…"):
+        try:
+            xero.exchange_code(params["code"])
+            tenants = xero.get_tenants()
+            if tenants:
+                xero.tenant_id = tenants[0]["tenantId"]
+                st.session_state["xero_access_token"]  = xero.access_token
+                st.session_state["xero_refresh_token"]  = xero.refresh_token
+                st.session_state["xero_token_expiry"]   = xero._token_expiry
+                st.session_state["xero_tenant_id"]      = xero.tenant_id
+                st.query_params.clear()
+                st.rerun()
+        except Exception as e:
+            st.error(f"Xero auth failed: {e}")
+
+
+def render_xero():
+    if not XERO_CLIENT_ID:
+        st.warning("XERO_CLIENT_ID not configured in secrets.")
+        return
+
+    if not xero.is_authenticated():
+        st.subheader("Connect to Xero")
+        st.markdown("Authorise OOM Dashboard to read your Xero accounting data.")
+        auth_url = xero.get_auth_url()
+        st.link_button("Connect to Xero", auth_url, type="primary")
+        return
+
+    org = xero.get_organisation()
+    if org:
+        st.caption(f"Connected to: **{org.get('Name', '')}**")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        from_date = st.date_input("From", value=datetime(2025, 1, 1))
+    with col2:
+        to_date = st.date_input("To", value=datetime.today())
+
+    if st.button("Load P&L"):
+        with st.spinner("Fetching P&L from Xero…"):
+            report = xero.get_profit_and_loss(
+                str(from_date), str(to_date), periods=12, timeframe="MONTH"
+            )
+        if not report:
+            st.error("Could not load P&L report.")
+            return
+
+        rows_data = []
+        reports = report.get("Reports", [])
+        if reports:
+            rpt = reports[0]
+            col_headers = [c.get("Value", "") for c in rpt.get("Rows", [{}])[0].get("Cells", [])]
+            for section in rpt.get("Rows", []):
+                if section.get("RowType") == "Section":
+                    title = section.get("Title", "")
+                    for row in section.get("Rows", []):
+                        if row.get("RowType") == "Row":
+                            cells = [c.get("Value", "") for c in row.get("Cells", [])]
+                            rows_data.append({"Section": title, **dict(zip(col_headers, cells))})
+                        elif row.get("RowType") == "SummaryRow":
+                            cells = [c.get("Value", "") for c in row.get("Cells", [])]
+                            rows_data.append({"Section": f"▶ {title} Total", **dict(zip(col_headers, cells))})
+
+        if rows_data:
+            df_pl = pd.DataFrame(rows_data).set_index("Section")
+            st.subheader("Profit & Loss")
+            st.dataframe(df_pl, use_container_width=True, height=600)
+        else:
+            st.info("No P&L data returned for this period.")
+
+
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     f"Standard orders ({len(normal_orders)})",
     f"Faire ({len(faire_orders)})",
     f"Samples ({len(zero_orders)})",
+    "Xero",
 ])
 
 with tab1:
@@ -178,4 +271,7 @@ with tab2:
 
 with tab3:
     render_zero_orders(zero_orders)
+
+with tab4:
+    render_xero()
 
