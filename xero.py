@@ -115,10 +115,13 @@ class XeroClient:
 
     # ── Reports ───────────────────────────────────────────────────────────────
 
-    def get_profit_and_loss(self, from_date: str, to_date: str) -> Optional[Dict]:
+    def get_profit_and_loss(self, from_date: str, to_date: str,
+                             periods: int = 12, timeframe: str = "MONTH") -> Optional[Dict]:
         return self._get("Reports/ProfitAndLoss", {
-            "fromDate": from_date,
-            "toDate":   to_date,
+            "fromDate":  from_date,
+            "toDate":    to_date,
+            "periods":   periods,
+            "timeframe": timeframe,
         })
 
     def get_balance_sheet(self, date: str) -> Optional[Dict]:

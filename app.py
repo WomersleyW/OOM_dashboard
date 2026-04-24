@@ -229,28 +229,88 @@ def render_xero():
                 st.error(f"Xero API error: {e}")
                 return
 
-        rows_data = []
         reports = report.get("Reports", [])
-        if reports:
-            rpt = reports[0]
-            col_headers = [c.get("Value", "") for c in rpt.get("Rows", [{}])[0].get("Cells", [])]
-            for section in rpt.get("Rows", []):
-                if section.get("RowType") == "Section":
-                    title = section.get("Title", "")
-                    for row in section.get("Rows", []):
-                        if row.get("RowType") == "Row":
-                            cells = [c.get("Value", "") for c in row.get("Cells", [])]
-                            rows_data.append({"Section": title, **dict(zip(col_headers, cells))})
-                        elif row.get("RowType") == "SummaryRow":
-                            cells = [c.get("Value", "") for c in row.get("Cells", [])]
-                            rows_data.append({"Section": f"▶ {title} Total", **dict(zip(col_headers, cells))})
-
-        if rows_data:
-            df_pl = pd.DataFrame(rows_data).set_index("Section")
-            st.subheader("Profit & Loss")
-            st.dataframe(df_pl, use_container_width=True, height=600)
-        else:
+        if not reports:
             st.info("No P&L data returned for this period.")
+            return
+
+        rpt = reports[0]
+
+        # ── Parse monthly columns and key rows ────────────────────────────────
+        def cell_val(cells, idx):
+            try:
+                v = cells[idx].get("Value", "") or "0"
+                return float(v.replace(",", ""))
+            except (ValueError, IndexError):
+                return 0.0
+
+        # Header row gives column labels (skip first "Account" cell)
+        header_row = next((r for r in rpt["Rows"] if r.get("RowType") == "Header"), None)
+        if not header_row:
+            st.error("Could not parse P&L header.")
+            return
+        col_labels = [c.get("Value", "") for c in header_row["Cells"][1:]]
+
+        income      = [0.0] * len(col_labels)
+        expenses    = [0.0] * len(col_labels)
+        gross_profit = [0.0] * len(col_labels)
+        net_profit   = [0.0] * len(col_labels)
+
+        for row in rpt["Rows"]:
+            rt    = row.get("RowType", "")
+            title = row.get("Title", "")
+            cells = row.get("Cells", [])
+
+            # Top-level summary rows for Gross/Net Profit
+            if rt == "Row":
+                label = cells[0].get("Value", "") if cells else ""
+                if "Gross Profit" in label:
+                    gross_profit = [cell_val(cells, i + 1) for i in range(len(col_labels))]
+                elif "Net Profit" in label or "Net Loss" in label:
+                    net_profit = [cell_val(cells, i + 1) for i in range(len(col_labels))]
+
+            # Section summary rows for Income and Expenses
+            if rt == "Section":
+                for sub in row.get("Rows", []):
+                    if sub.get("RowType") == "SummaryRow":
+                        sub_cells = sub.get("Cells", [])
+                        sub_label = sub_cells[0].get("Value", "") if sub_cells else ""
+                        vals = [cell_val(sub_cells, i + 1) for i in range(len(col_labels))]
+                        if "Income" in title or "Revenue" in title or "Trading Income" in title:
+                            income = [income[i] + vals[i] for i in range(len(col_labels))]
+                        elif "Expense" in title or "Cost" in title or "Overhead" in title or "Operating" in title:
+                            expenses = [expenses[i] + vals[i] for i in range(len(col_labels))]
+
+        # ── Build DataFrame ───────────────────────────────────────────────────
+        df = pd.DataFrame({
+            "Income":       income,
+            "Expenses":     expenses,
+            "Gross Profit": gross_profit,
+            "Net Profit":   net_profit,
+        }, index=col_labels)
+
+        # Drop empty columns (no data)
+        df = df[(df != 0).any(axis=1)]
+
+        # ── Margin summary — last 6 months ────────────────────────────────────
+        last6 = df.tail(6)
+        avg_gross_margin = (last6["Gross Profit"] / last6["Income"].replace(0, float("nan"))).mean() * 100
+        avg_net_margin   = (last6["Net Profit"]   / last6["Income"].replace(0, float("nan"))).mean() * 100
+
+        m1, m2 = st.columns(2)
+        m1.metric("Avg Gross Margin (last 6 months)", f"{avg_gross_margin:.1f}%")
+        m2.metric("Avg Net Margin (last 6 months)",   f"{avg_net_margin:.1f}%")
+
+        # ── Charts ────────────────────────────────────────────────────────────
+        try:
+            dt_index = pd.to_datetime(df.index, format="%b %Y")
+        except Exception:
+            dt_index = df.index
+
+        for metric in ["Income", "Expenses", "Gross Profit", "Net Profit"]:
+            st.subheader(metric)
+            chart = pd.DataFrame({metric: df[metric].values}, index=dt_index)
+            st.bar_chart(chart, use_container_width=True)
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
