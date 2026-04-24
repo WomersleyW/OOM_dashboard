@@ -324,11 +324,14 @@ def render_xero():
             (df_cogs.loc["Total"]  if not df_cogs.empty  else pd.Series([0.0]*len(col_labels), index=col_labels)) +
             (df_admin.loc["Total"] if not df_admin.empty else pd.Series([0.0]*len(col_labels), index=col_labels))
         )
-        gp_series = pd.Series(gross_profits, index=col_labels)
-        np_series = pd.Series(net_profits,  index=col_labels)
+        # ── Derived profit figures ────────────────────────────────────────────
+        cogs_total  = df_cogs.loc["Total"]  if not df_cogs.empty  else pd.Series([0.0]*len(col_labels), index=col_labels)
+        admin_total = df_admin.loc["Total"] if not df_admin.empty else pd.Series([0.0]*len(col_labels), index=col_labels)
+        gp_series   = income_total - cogs_total
+        np_series   = gp_series - admin_total
 
         # ── Margin cards — last 6 months ──────────────────────────────────────
-        last6_income = income_total.tail(6).replace(0, float("nan"))
+        last6_income     = income_total.tail(6).replace(0, float("nan"))
         avg_gross_margin = (gp_series.tail(6) / last6_income).mean() * 100
         avg_net_margin   = (np_series.tail(6) / last6_income).mean() * 100
 
@@ -340,6 +343,8 @@ def render_xero():
             if isinstance(val, (int, float)):
                 return "color: #2ecc71" if val >= 0 else "color: #e74c3c"
             return ""
+
+        import altair as alt
 
         def stacked_bar(df_table, title):
             if df_table.empty:
@@ -353,7 +358,21 @@ def render_xero():
                 dt_idx = col_labels
             chart_df = df_table.loc[accounts].T.copy()
             chart_df.index = dt_idx
-            st.bar_chart(chart_df, use_container_width=True, stack=True)
+            chart_df.index.name = "Month"
+            long_df = chart_df.reset_index().melt(id_vars="Month", var_name="Account", value_name="Amount")
+            bar_width = max(15, min(50, 400 // max(len(col_labels), 1)))
+            chart = (
+                alt.Chart(long_df)
+                .mark_bar(size=bar_width)
+                .encode(
+                    x=alt.X("Month:T", title=None, axis=alt.Axis(format="%b %Y", labelAngle=-45)),
+                    y=alt.Y("Amount:Q", title="£", stack=True),
+                    color=alt.Color("Account:N"),
+                    tooltip=["Month:T", "Account:N", alt.Tooltip("Amount:Q", format="£,.0f")],
+                )
+                .properties(height=300)
+            )
+            st.altair_chart(chart, use_container_width=True)
 
         stacked_bar(df_turnover, "Turnover")
         stacked_bar(df_cogs,     "Cost of Sales")
@@ -362,11 +381,11 @@ def render_xero():
         # ── Summary comparison table ──────────────────────────────────────────
         st.subheader("Monthly summary")
         df_summary = pd.DataFrame({
-            "Turnover":     income_total.values,
-            "Cost of Sales": (df_cogs.loc["Total"] if not df_cogs.empty else pd.Series([0.0]*len(col_labels), index=col_labels)).values,
-            "Admin Costs":  (df_admin.loc["Total"] if not df_admin.empty else pd.Series([0.0]*len(col_labels), index=col_labels)).values,
-            "Gross Profit": gross_profits,
-            "Net Profit":   net_profits,
+            "Turnover":      income_total.values,
+            "Cost of Sales": cogs_total.values,
+            "Admin Costs":   admin_total.values,
+            "Gross Profit":  gp_series.values,
+            "Net Profit":    np_series.values,
         }, index=col_labels)
         df_summary = df_summary[(df_summary != 0).any(axis=1)]
 
