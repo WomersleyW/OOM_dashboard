@@ -301,20 +301,41 @@ def render_xero():
         m1.metric("Avg Gross Margin (last 6 months)", f"{avg_gross_margin:.1f}%")
         m2.metric("Avg Net Margin (last 6 months)",   f"{avg_net_margin:.1f}%")
 
-        # ── Combined chart ────────────────────────────────────────────────────
+        # ── Summary table ─────────────────────────────────────────────────────
+        st.subheader("Monthly comparison")
+
+        df_display = df[["Income", "Expenses", "Gross Profit", "Net Profit"]].copy()
+        df_display.index.name = "Month"
+
+        def colour_net(val):
+            if isinstance(val, float):
+                return "color: #2ecc71" if val >= 0 else "color: #e74c3c"
+            return ""
+
+        st.dataframe(
+            df_display.style
+                .format("£{:,.0f}")
+                .applymap(colour_net, subset=["Net Profit", "Gross Profit"])
+                .background_gradient(cmap="Blues", subset=["Income"])
+                .background_gradient(cmap="Reds",  subset=["Expenses"]),
+            use_container_width=True,
+            height=min(50 + len(df_display) * 35, 500),
+        )
+
+        # ── Trend line chart ──────────────────────────────────────────────────
         try:
             dt_index = pd.to_datetime(df.index, format="%b %Y")
         except Exception:
             dt_index = df.index
 
-        st.subheader("Monthly summary")
+        st.subheader("Trend")
         chart = pd.DataFrame({
             "Income":       df["Income"].values,
             "Expenses":     df["Expenses"].values,
             "Gross Profit": df["Gross Profit"].values,
             "Net Profit":   df["Net Profit"].values,
         }, index=dt_index)
-        st.bar_chart(chart, use_container_width=True)
+        st.line_chart(chart, use_container_width=True)
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
