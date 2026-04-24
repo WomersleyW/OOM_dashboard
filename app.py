@@ -301,16 +301,20 @@ def render_xero():
         m1.metric("Avg Gross Margin (last 6 months)", f"{avg_gross_margin:.1f}%")
         m2.metric("Avg Net Margin (last 6 months)",   f"{avg_net_margin:.1f}%")
 
-        # ── Charts ────────────────────────────────────────────────────────────
+        # ── Combined chart ────────────────────────────────────────────────────
         try:
             dt_index = pd.to_datetime(df.index, format="%b %Y")
         except Exception:
             dt_index = df.index
 
-        for metric in ["Income", "Expenses", "Gross Profit", "Net Profit"]:
-            st.subheader(metric)
-            chart = pd.DataFrame({metric: df[metric].values}, index=dt_index)
-            st.bar_chart(chart, use_container_width=True)
+        st.subheader("Monthly summary")
+        chart = pd.DataFrame({
+            "Income":       df["Income"].values,
+            "Expenses":     df["Expenses"].values,
+            "Gross Profit": df["Gross Profit"].values,
+            "Net Profit":   df["Net Profit"].values,
+        }, index=dt_index)
+        st.bar_chart(chart, use_container_width=True)
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
