@@ -115,14 +115,40 @@ class XeroClient:
 
     # ── Reports ───────────────────────────────────────────────────────────────
 
-    def get_profit_and_loss(self, from_date: str, to_date: str,
-                             periods: int = 11, timeframe: str = "MONTH") -> Optional[Dict]:
+    def get_profit_and_loss(self, from_date: str, to_date: str) -> Optional[Dict]:
+        """Fetch P&L for a single discrete period (from_date → to_date)."""
         return self._get("Reports/ProfitAndLoss", {
-            "fromDate":  from_date,
-            "toDate":    to_date,
-            "periods":   periods,
-            "timeframe": timeframe,
+            "fromDate": from_date,
+            "toDate":   to_date,
         })
+
+    def get_profit_and_loss_monthly(self, from_date: str, to_date: str) -> List[Dict]:
+        """
+        Return a list of {month_label, report} dicts, one per calendar month
+        between from_date and to_date, giving discrete (non-cumulative) values.
+        """
+        from datetime import date
+        import calendar
+
+        start = date.fromisoformat(from_date)
+        end   = date.fromisoformat(to_date)
+
+        results = []
+        year, month = start.year, start.month
+        while date(year, month, 1) <= end:
+            last_day = calendar.monthrange(year, month)[1]
+            m_start  = date(year, month, 1).isoformat()
+            m_end    = date(year, month, last_day).isoformat()
+            label    = date(year, month, 1).strftime("%b %Y")
+            report   = self.get_profit_and_loss(m_start, m_end)
+            if report:
+                results.append({"label": label, "report": report})
+            month += 1
+            if month > 12:
+                month = 1
+                year += 1
+            time.sleep(0.4)   # respect Xero rate limit
+        return results
 
     def get_balance_sheet(self, date: str) -> Optional[Dict]:
         return self._get("Reports/BalanceSheet", {"date": date})

@@ -222,21 +222,18 @@ def render_xero():
         to_date = st.date_input("To", value=datetime.today())
 
     if st.button("Load P&L"):
-        with st.spinner("Fetching P&L from Xero…"):
+        with st.spinner("Fetching monthly P&L from Xero… (one call per month)"):
             try:
-                report = xero.get_profit_and_loss(str(from_date), str(to_date))
+                monthly_reports = xero.get_profit_and_loss_monthly(str(from_date), str(to_date))
             except Exception as e:
                 st.error(f"Xero API error: {e}")
                 return
 
-        reports = report.get("Reports", [])
-        if not reports:
+        if not monthly_reports:
             st.info("No P&L data returned for this period.")
             return
 
-        rpt = reports[0]
-
-        # ── Parse monthly columns and key rows ────────────────────────────────
+        # ── Parse each single-month report ────────────────────────────────────
         def cell_val(cells, idx):
             try:
                 v = cells[idx].get("Value", "") or "0"
@@ -244,48 +241,54 @@ def render_xero():
             except (ValueError, IndexError):
                 return 0.0
 
-        # Header row gives column labels (skip first "Account" cell)
-        header_row = next((r for r in rpt["Rows"] if r.get("RowType") == "Header"), None)
-        if not header_row:
-            st.error("Could not parse P&L header.")
-            return
-        col_labels = [c.get("Value", "") for c in header_row["Cells"][1:]]
+        def parse_single(rpt):
+            """Extract income rows, expense rows, gross profit, net profit from one month."""
+            inc, exp, gp, np_ = {}, {}, 0.0, 0.0
+            INCOME_KW  = ("income", "revenue", "trading income", "sales")
+            EXPENSE_KW = ("expense", "cost", "overhead", "operating", "depreciation", "wages")
+            for row in rpt.get("Rows", []):
+                rt    = row.get("RowType", "")
+                title = row.get("Title", "").lower()
+                cells = row.get("Cells", [])
+                if rt == "Row":
+                    label = cells[0].get("Value", "") if cells else ""
+                    if "Gross Profit" in label:
+                        gp = cell_val(cells, 1)
+                    elif "Net Profit" in label or "Net Loss" in label:
+                        np_ = cell_val(cells, 1)
+                if rt == "Section":
+                    is_inc = any(k in title for k in INCOME_KW)
+                    is_exp = any(k in title for k in EXPENSE_KW)
+                    for sub in row.get("Rows", []):
+                        if sub.get("RowType") != "Row":
+                            continue
+                        sc = sub.get("Cells", [])
+                        name = sc[0].get("Value", "").strip() if sc else ""
+                        val  = cell_val(sc, 1)
+                        if name and is_inc:
+                            inc[name] = val
+                        elif name and is_exp:
+                            exp[name] = val
+            return inc, exp, gp, np_
 
-        income_rows   = {}  # {account_name: [val_per_month]}
+        col_labels    = [m["label"] for m in monthly_reports]
+        income_rows   = {}
         expense_rows  = {}
-        gross_profit  = [0.0] * len(col_labels)
-        net_profit    = [0.0] * len(col_labels)
+        gross_profits = []
+        net_profits   = []
 
-        INCOME_KEYWORDS  = ("income", "revenue", "trading income", "sales")
-        EXPENSE_KEYWORDS = ("expense", "cost", "overhead", "operating", "depreciation", "wages")
+        for m in monthly_reports:
+            rpt_data = m["report"].get("Reports", [{}])[0]
+            inc, exp, gp, np_ = parse_single(rpt_data)
+            gross_profits.append(gp)
+            net_profits.append(np_)
+            for k, v in inc.items():
+                income_rows.setdefault(k, [0.0] * len(col_labels))
+                income_rows[k][col_labels.index(m["label"])] = v
+            for k, v in exp.items():
+                expense_rows.setdefault(k, [0.0] * len(col_labels))
+                expense_rows[k][col_labels.index(m["label"])] = v
 
-        for row in rpt["Rows"]:
-            rt    = row.get("RowType", "")
-            title = row.get("Title", "").lower()
-            cells = row.get("Cells", [])
-
-            if rt == "Row":
-                label = cells[0].get("Value", "") if cells else ""
-                if "Gross Profit" in label:
-                    gross_profit = [cell_val(cells, i + 1) for i in range(len(col_labels))]
-                elif "Net Profit" in label or "Net Loss" in label:
-                    net_profit = [cell_val(cells, i + 1) for i in range(len(col_labels))]
-
-            if rt == "Section":
-                is_income  = any(k in title for k in INCOME_KEYWORDS)
-                is_expense = any(k in title for k in EXPENSE_KEYWORDS)
-                for sub in row.get("Rows", []):
-                    sub_rt    = sub.get("RowType", "")
-                    sub_cells = sub.get("Cells", [])
-                    if not sub_cells:
-                        continue
-                    name = sub_cells[0].get("Value", "").strip()
-                    vals = [cell_val(sub_cells, i + 1) for i in range(len(col_labels))]
-                    if sub_rt == "Row" and name:
-                        if is_income:
-                            income_rows[name]  = vals
-                        elif is_expense:
-                            expense_rows[name] = vals
 
         def make_df(rows_dict):
             if not rows_dict:
@@ -301,8 +304,8 @@ def render_xero():
         # Totals series for margin calc
         income_total  = df_income.loc["Total"]  if not df_income.empty  else pd.Series([0]*len(col_labels), index=col_labels)
         expense_total = df_expenses.loc["Total"] if not df_expenses.empty else pd.Series([0]*len(col_labels), index=col_labels)
-        gp_series = pd.Series(gross_profit, index=col_labels)
-        np_series = pd.Series(net_profit,   index=col_labels)
+        gp_series = pd.Series(gross_profits, index=col_labels)
+        np_series = pd.Series(net_profits,  index=col_labels)
 
         # ── Margin cards — last 6 months ──────────────────────────────────────
         last6_income = income_total.tail(6).replace(0, float("nan"))
@@ -341,8 +344,8 @@ def render_xero():
         df_summary = pd.DataFrame({
             "Income":       income_total.values,
             "Expenses":     expense_total.values,
-            "Gross Profit": gross_profit,
-            "Net Profit":   net_profit,
+            "Gross Profit": gross_profits,
+            "Net Profit":   net_profits,
         }, index=col_labels)
         df_summary = df_summary[(df_summary != 0).any(axis=1)]
 
