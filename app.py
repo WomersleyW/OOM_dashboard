@@ -33,7 +33,9 @@ with st.spinner("Fetching orders from Shopify…"):
         st.stop()
 
 if not all_orders:
-    st.warning("No orders returned. Check SHOPIFY_STORE_URL and SHOPIFY_ACCESS_TOKEN in secrets.")
+    st.error("No orders returned.")
+    st.write("Store URL:", store_url or "⚠️ NOT SET")
+    st.write("Token:", ("✓ set (" + access_token[:8] + "...)") if access_token else "⚠️ NOT SET")
     st.stop()
 
 normal_orders, faire_orders, zero_orders = classify_orders(all_orders)
