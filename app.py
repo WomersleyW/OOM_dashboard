@@ -241,14 +241,20 @@ def render_xero():
             except (ValueError, IndexError):
                 return 0.0
 
+        TURNOVER_ACCOUNTS = ("shopify sales", "sales by product")
+        COGS_KW  = ("cost of sales", "direct costs", "cost of goods", "cogs")
+        ADMIN_KW = ("operating", "overhead", "administrative", "admin",
+                    "expense", "depreciation", "wages", "staff")
+
         def parse_single(rpt):
-            """Extract turnover, cost of sales, admin rows, gross profit, net profit."""
+            """
+            Turnover  = income accounts matching TURNOVER_ACCOUNTS.
+            Cost of Sales = all other income accounts + any explicit CoS sections.
+            Admin     = operating/expense sections.
+            """
             turnover, cogs, admin = {}, {}, {}
             gp, np_ = 0.0, 0.0
-            TURNOVER_KW = ("income", "revenue", "trading income", "sales", "turnover")
-            COGS_KW     = ("cost of sales", "direct costs", "cost of goods", "cogs")
-            ADMIN_KW    = ("operating", "overhead", "administrative", "admin",
-                           "expense", "depreciation", "wages", "staff")
+            INCOME_KW = ("income", "revenue", "trading income", "sales", "turnover")
             for row in rpt.get("Rows", []):
                 rt    = row.get("RowType", "")
                 title = row.get("Title", "").lower()
@@ -260,9 +266,9 @@ def render_xero():
                     elif "Net Profit" in label or "Net Loss" in label:
                         np_ = cell_val(cells, 1)
                 if rt == "Section":
-                    is_turnover = any(k in title for k in TURNOVER_KW)
-                    is_cogs     = any(k in title for k in COGS_KW)
-                    is_admin    = any(k in title for k in ADMIN_KW) and not is_cogs
+                    is_income = any(k in title for k in INCOME_KW)
+                    is_cogs   = any(k in title for k in COGS_KW)
+                    is_admin  = any(k in title for k in ADMIN_KW) and not is_cogs
                     for sub in row.get("Rows", []):
                         if sub.get("RowType") != "Row":
                             continue
@@ -271,8 +277,11 @@ def render_xero():
                         val  = cell_val(sc, 1)
                         if not name:
                             continue
-                        if is_turnover:
-                            turnover[name] = val
+                        if is_income:
+                            if any(t in name.lower() for t in TURNOVER_ACCOUNTS):
+                                turnover[name] = val
+                            else:
+                                cogs[name] = val   # other income → cost of sales
                         elif is_cogs:
                             cogs[name] = val
                         elif is_admin:
