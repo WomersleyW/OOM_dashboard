@@ -110,17 +110,15 @@ class XeroClient:
             params=params,
         )
         if not r.ok:
-            print(f"  [Xero {r.status_code}] {endpoint}: {r.text[:120]}")
-            return None
+            raise RuntimeError(f"[{r.status_code}] {endpoint}: {r.text[:300]}")
         return r.json()
 
     # ── Reports ───────────────────────────────────────────────────────────────
 
-    def get_profit_and_loss(self, from_date: str, to_date: str,
-                             periods: int = 12, timeframe: str = "MONTH") -> Optional[Dict]:
+    def get_profit_and_loss(self, from_date: str, to_date: str) -> Optional[Dict]:
         return self._get("Reports/ProfitAndLoss", {
-            "fromDate": from_date, "toDate": to_date,
-            "periods": periods, "timeframe": timeframe,
+            "fromDate": from_date,
+            "toDate":   to_date,
         })
 
     def get_balance_sheet(self, date: str) -> Optional[Dict]:

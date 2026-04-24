@@ -223,12 +223,11 @@ def render_xero():
 
     if st.button("Load P&L"):
         with st.spinner("Fetching P&L from Xero…"):
-            report = xero.get_profit_and_loss(
-                str(from_date), str(to_date), periods=12, timeframe="MONTH"
-            )
-        if not report:
-            st.error("Could not load P&L report.")
-            return
+            try:
+                report = xero.get_profit_and_loss(str(from_date), str(to_date))
+            except Exception as e:
+                st.error(f"Xero API error: {e}")
+                return
 
         rows_data = []
         reports = report.get("Reports", [])
