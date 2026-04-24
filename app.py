@@ -241,7 +241,7 @@ def render_xero():
             except (ValueError, IndexError):
                 return 0.0
 
-        TURNOVER_ACCOUNTS = ("shopify sales", "sales by product")
+        TURNOVER_ACCOUNTS = ("shopify sales", "sales by product", "sales of product income")
         COGS_KW  = ("cost of sales", "direct costs", "cost of goods", "cogs")
         ADMIN_KW = ("operating", "overhead", "administrative", "admin",
                     "expense", "depreciation", "wages", "staff")
