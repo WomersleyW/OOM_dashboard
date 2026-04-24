@@ -26,7 +26,15 @@ def load_data(_store_url, _access_token):
     return client.get_all_orders(financial_status="any")
 
 with st.spinner("Fetching orders from Shopify…"):
-    all_orders = load_data(store_url, access_token)
+    try:
+        all_orders = load_data(store_url, access_token)
+    except Exception as e:
+        st.error(f"Shopify load error: {e}")
+        st.stop()
+
+if not all_orders:
+    st.warning("No orders returned. Check SHOPIFY_STORE_URL and SHOPIFY_ACCESS_TOKEN in secrets.")
+    st.stop()
 
 normal_orders, faire_orders, zero_orders = classify_orders(all_orders)
 
