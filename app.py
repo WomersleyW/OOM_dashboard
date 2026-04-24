@@ -251,17 +251,19 @@ def render_xero():
             return
         col_labels = [c.get("Value", "") for c in header_row["Cells"][1:]]
 
-        income      = [0.0] * len(col_labels)
-        expenses    = [0.0] * len(col_labels)
-        gross_profit = [0.0] * len(col_labels)
-        net_profit   = [0.0] * len(col_labels)
+        income_rows   = {}  # {account_name: [val_per_month]}
+        expense_rows  = {}
+        gross_profit  = [0.0] * len(col_labels)
+        net_profit    = [0.0] * len(col_labels)
+
+        INCOME_KEYWORDS  = ("income", "revenue", "trading income", "sales")
+        EXPENSE_KEYWORDS = ("expense", "cost", "overhead", "operating", "depreciation", "wages")
 
         for row in rpt["Rows"]:
             rt    = row.get("RowType", "")
-            title = row.get("Title", "")
+            title = row.get("Title", "").lower()
             cells = row.get("Cells", [])
 
-            # Top-level summary rows for Gross/Net Profit
             if rt == "Row":
                 label = cells[0].get("Value", "") if cells else ""
                 if "Gross Profit" in label:
@@ -269,73 +271,99 @@ def render_xero():
                 elif "Net Profit" in label or "Net Loss" in label:
                     net_profit = [cell_val(cells, i + 1) for i in range(len(col_labels))]
 
-            # Section summary rows for Income and Expenses
             if rt == "Section":
+                is_income  = any(k in title for k in INCOME_KEYWORDS)
+                is_expense = any(k in title for k in EXPENSE_KEYWORDS)
                 for sub in row.get("Rows", []):
-                    if sub.get("RowType") == "SummaryRow":
-                        sub_cells = sub.get("Cells", [])
-                        sub_label = sub_cells[0].get("Value", "") if sub_cells else ""
-                        vals = [cell_val(sub_cells, i + 1) for i in range(len(col_labels))]
-                        if "Income" in title or "Revenue" in title or "Trading Income" in title:
-                            income = [income[i] + vals[i] for i in range(len(col_labels))]
-                        elif "Expense" in title or "Cost" in title or "Overhead" in title or "Operating" in title:
-                            expenses = [expenses[i] + vals[i] for i in range(len(col_labels))]
+                    sub_rt    = sub.get("RowType", "")
+                    sub_cells = sub.get("Cells", [])
+                    if not sub_cells:
+                        continue
+                    name = sub_cells[0].get("Value", "").strip()
+                    vals = [cell_val(sub_cells, i + 1) for i in range(len(col_labels))]
+                    if sub_rt == "Row" and name:
+                        if is_income:
+                            income_rows[name]  = vals
+                        elif is_expense:
+                            expense_rows[name] = vals
 
-        # ── Build DataFrame ───────────────────────────────────────────────────
-        df = pd.DataFrame({
-            "Income":       income,
-            "Expenses":     expenses,
-            "Gross Profit": gross_profit,
-            "Net Profit":   net_profit,
-        }, index=col_labels)
+        def make_df(rows_dict):
+            if not rows_dict:
+                return pd.DataFrame()
+            df_out = pd.DataFrame(rows_dict, index=col_labels).T
+            df_out = df_out.loc[(df_out != 0).any(axis=1)]
+            df_out.loc["Total"] = df_out.sum()
+            return df_out
 
-        # Drop empty columns (no data)
-        df = df[(df != 0).any(axis=1)]
+        df_income   = make_df(income_rows)
+        df_expenses = make_df(expense_rows)
 
-        # ── Margin summary — last 6 months ────────────────────────────────────
-        last6 = df.tail(6)
-        avg_gross_margin = (last6["Gross Profit"] / last6["Income"].replace(0, float("nan"))).mean() * 100
-        avg_net_margin   = (last6["Net Profit"]   / last6["Income"].replace(0, float("nan"))).mean() * 100
+        # Totals series for margin calc
+        income_total  = df_income.loc["Total"]  if not df_income.empty  else pd.Series([0]*len(col_labels), index=col_labels)
+        expense_total = df_expenses.loc["Total"] if not df_expenses.empty else pd.Series([0]*len(col_labels), index=col_labels)
+        gp_series = pd.Series(gross_profit, index=col_labels)
+        np_series = pd.Series(net_profit,   index=col_labels)
+
+        # ── Margin cards — last 6 months ──────────────────────────────────────
+        last6_income = income_total.tail(6).replace(0, float("nan"))
+        avg_gross_margin = (gp_series.tail(6) / last6_income).mean() * 100
+        avg_net_margin   = (np_series.tail(6) / last6_income).mean() * 100
 
         m1, m2 = st.columns(2)
         m1.metric("Avg Gross Margin (last 6 months)", f"{avg_gross_margin:.1f}%")
         m2.metric("Avg Net Margin (last 6 months)",   f"{avg_net_margin:.1f}%")
 
-        # ── Summary table ─────────────────────────────────────────────────────
-        st.subheader("Monthly comparison")
-
-        df_display = df[["Income", "Expenses", "Gross Profit", "Net Profit"]].copy()
-        df_display.index.name = "Month"
-
-        def colour_net(val):
-            if isinstance(val, float):
+        def colour_profit(val):
+            if isinstance(val, (int, float)):
                 return "color: #2ecc71" if val >= 0 else "color: #e74c3c"
             return ""
 
+        def render_breakdown(df_table, title, cmap):
+            if df_table.empty:
+                return
+            st.subheader(title)
+            products = [i for i in df_table.index if i != "Total"]
+            st.dataframe(
+                df_table.style
+                    .format("£{:,.0f}")
+                    .background_gradient(cmap=cmap, subset=pd.IndexSlice[products, col_labels])
+                    .apply(lambda _: ["font-weight:bold; background-color:#1565C0; color:white"] * len(df_table.columns),
+                           subset=pd.IndexSlice[["Total"], :], axis=1),
+                use_container_width=True,
+                height=min(80 + len(df_table) * 35, 500),
+            )
+
+        render_breakdown(df_income,   "Income by account / month",   "Blues")
+        render_breakdown(df_expenses, "Expenses by account / month", "Reds")
+
+        # ── Summary comparison table ──────────────────────────────────────────
+        st.subheader("Monthly summary")
+        df_summary = pd.DataFrame({
+            "Income":       income_total.values,
+            "Expenses":     expense_total.values,
+            "Gross Profit": gross_profit,
+            "Net Profit":   net_profit,
+        }, index=col_labels)
+        df_summary = df_summary[(df_summary != 0).any(axis=1)]
+
         st.dataframe(
-            df_display.style
+            df_summary.style
                 .format("£{:,.0f}")
-                .map(colour_net, subset=["Net Profit", "Gross Profit"])
-                .background_gradient(cmap="Blues", subset=["Income"])
-                .background_gradient(cmap="Reds",  subset=["Expenses"]),
+                .map(colour_profit, subset=["Gross Profit", "Net Profit"])
+                .background_gradient(cmap="Blues",  subset=["Income"])
+                .background_gradient(cmap="Reds",   subset=["Expenses"]),
             use_container_width=True,
-            height=min(50 + len(df_display) * 35, 500),
+            height=min(80 + len(df_summary) * 35, 500),
         )
 
         # ── Trend line chart ──────────────────────────────────────────────────
         try:
-            dt_index = pd.to_datetime(df.index, format="%b %Y")
+            dt_index = pd.to_datetime(df_summary.index, format="%b %Y")
         except Exception:
-            dt_index = df.index
+            dt_index = df_summary.index
 
         st.subheader("Trend")
-        chart = pd.DataFrame({
-            "Income":       df["Income"].values,
-            "Expenses":     df["Expenses"].values,
-            "Gross Profit": df["Gross Profit"].values,
-            "Net Profit":   df["Net Profit"].values,
-        }, index=dt_index)
-        st.line_chart(chart, use_container_width=True)
+        st.line_chart(df_summary.set_index(dt_index), use_container_width=True)
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
