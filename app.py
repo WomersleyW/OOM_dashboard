@@ -315,7 +315,7 @@ def render_xero():
         st.dataframe(
             df_display.style
                 .format("£{:,.0f}")
-                .applymap(colour_net, subset=["Net Profit", "Gross Profit"])
+                .map(colour_net, subset=["Net Profit", "Gross Profit"])
                 .background_gradient(cmap="Blues", subset=["Income"])
                 .background_gradient(cmap="Reds",  subset=["Expenses"]),
             use_container_width=True,
