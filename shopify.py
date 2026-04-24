@@ -81,8 +81,8 @@ class ShopifyClient:
                 time.sleep(float(response.headers.get("Retry-After", 2)))
                 continue
             if not response.ok:
-                print(f"  [{response.status_code}] GET /orders — {response.text[:120]}")
-                break
+                raise RuntimeError(f"[{response.status_code}] GET /orders — {response.text[:200]}")
+
             all_orders.extend(response.json().get("orders", []))
             # Follow the next-page cursor from the Link header
             link = response.headers.get("Link", "")
