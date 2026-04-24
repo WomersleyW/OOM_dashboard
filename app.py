@@ -352,23 +352,22 @@ def render_xero():
                 return
             st.subheader(title)
             accounts = [i for i in df_table.index if i != "Total"]
-            try:
-                dt_idx = pd.to_datetime(col_labels, format="%b %Y")
-            except Exception:
-                dt_idx = col_labels
             chart_df = df_table.loc[accounts].T.copy()
-            chart_df.index = dt_idx
+            chart_df.index = col_labels
             chart_df.index.name = "Month"
             long_df = chart_df.reset_index().melt(id_vars="Month", var_name="Account", value_name="Amount")
+            long_df["Amount"] = pd.to_numeric(long_df["Amount"], errors="coerce").fillna(0)
             bar_width = max(15, min(50, 400 // max(len(col_labels), 1)))
             chart = (
                 alt.Chart(long_df)
                 .mark_bar(size=bar_width)
                 .encode(
-                    x=alt.X("Month:T", title=None, axis=alt.Axis(format="%b %Y", labelAngle=-45)),
+                    x=alt.X("Month:O", title=None,
+                             sort=col_labels,
+                             axis=alt.Axis(labelAngle=-45)),
                     y=alt.Y("Amount:Q", title="£", stack=True),
                     color=alt.Color("Account:N"),
-                    tooltip=["Month:T", "Account:N", alt.Tooltip("Amount:Q", format="£,.0f")],
+                    tooltip=["Month:O", "Account:N", alt.Tooltip("Amount:Q", format="£,.0f")],
                 )
                 .properties(height=300)
             )
