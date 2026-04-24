@@ -25,6 +25,9 @@ def load_data(_store_url, _access_token):
     client = ShopifyClient(store_url=_store_url, access_token=_access_token)
     return client.get_all_orders(financial_status="any")
 
+if st.button("🔄 Refresh data"):
+    st.cache_data.clear()
+
 with st.spinner("Fetching orders from Shopify…"):
     try:
         all_orders = load_data(store_url, access_token)
