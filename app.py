@@ -374,6 +374,12 @@ def render_xero():
             )
             st.altair_chart(chart, use_container_width=True)
 
+        with st.expander("Debug: raw data"):
+            st.write("Turnover rows:", turnover_rows)
+            st.write("COGS rows:", cogs_rows)
+            st.write("Admin rows:", admin_rows)
+            st.write("col_labels:", col_labels)
+
         stacked_bar(df_turnover, "Turnover")
         stacked_bar(df_cogs,     "Cost of Sales")
         stacked_bar(df_admin,    "Administrative Costs")
