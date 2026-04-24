@@ -242,10 +242,13 @@ def render_xero():
                 return 0.0
 
         def parse_single(rpt):
-            """Extract income rows, expense rows, gross profit, net profit from one month."""
-            inc, exp, gp, np_ = {}, {}, 0.0, 0.0
-            INCOME_KW  = ("income", "revenue", "trading income", "sales")
-            EXPENSE_KW = ("expense", "cost", "overhead", "operating", "depreciation", "wages")
+            """Extract turnover, cost of sales, admin rows, gross profit, net profit."""
+            turnover, cogs, admin = {}, {}, {}
+            gp, np_ = 0.0, 0.0
+            TURNOVER_KW = ("income", "revenue", "trading income", "sales", "turnover")
+            COGS_KW     = ("cost of sales", "direct costs", "cost of goods", "cogs")
+            ADMIN_KW    = ("operating", "overhead", "administrative", "admin",
+                           "expense", "depreciation", "wages", "staff")
             for row in rpt.get("Rows", []):
                 rt    = row.get("RowType", "")
                 title = row.get("Title", "").lower()
@@ -257,38 +260,42 @@ def render_xero():
                     elif "Net Profit" in label or "Net Loss" in label:
                         np_ = cell_val(cells, 1)
                 if rt == "Section":
-                    is_inc = any(k in title for k in INCOME_KW)
-                    is_exp = any(k in title for k in EXPENSE_KW)
+                    is_turnover = any(k in title for k in TURNOVER_KW)
+                    is_cogs     = any(k in title for k in COGS_KW)
+                    is_admin    = any(k in title for k in ADMIN_KW) and not is_cogs
                     for sub in row.get("Rows", []):
                         if sub.get("RowType") != "Row":
                             continue
-                        sc = sub.get("Cells", [])
+                        sc   = sub.get("Cells", [])
                         name = sc[0].get("Value", "").strip() if sc else ""
                         val  = cell_val(sc, 1)
-                        if name and is_inc:
-                            inc[name] = val
-                        elif name and is_exp:
-                            exp[name] = val
-            return inc, exp, gp, np_
+                        if not name:
+                            continue
+                        if is_turnover:
+                            turnover[name] = val
+                        elif is_cogs:
+                            cogs[name] = val
+                        elif is_admin:
+                            admin[name] = val
+            return turnover, cogs, admin, gp, np_
 
-        col_labels    = [m["label"] for m in monthly_reports]
-        income_rows   = {}
-        expense_rows  = {}
-        gross_profits = []
-        net_profits   = []
+        col_labels     = [m["label"] for m in monthly_reports]
+        turnover_rows  = {}
+        cogs_rows      = {}
+        admin_rows     = {}
+        gross_profits  = []
+        net_profits    = []
 
         for m in monthly_reports:
             rpt_data = m["report"].get("Reports", [{}])[0]
-            inc, exp, gp, np_ = parse_single(rpt_data)
+            turnover, cogs, admin, gp, np_ = parse_single(rpt_data)
             gross_profits.append(gp)
             net_profits.append(np_)
-            for k, v in inc.items():
-                income_rows.setdefault(k, [0.0] * len(col_labels))
-                income_rows[k][col_labels.index(m["label"])] = v
-            for k, v in exp.items():
-                expense_rows.setdefault(k, [0.0] * len(col_labels))
-                expense_rows[k][col_labels.index(m["label"])] = v
-
+            idx = col_labels.index(m["label"])
+            for bucket, store in [(turnover, turnover_rows), (cogs, cogs_rows), (admin, admin_rows)]:
+                for k, v in bucket.items():
+                    store.setdefault(k, [0.0] * len(col_labels))
+                    store[k][idx] = v
 
         def make_df(rows_dict):
             if not rows_dict:
@@ -298,12 +305,16 @@ def render_xero():
             df_out.loc["Total"] = df_out.sum()
             return df_out
 
-        df_income   = make_df(income_rows)
-        df_expenses = make_df(expense_rows)
+        df_turnover = make_df(turnover_rows)
+        df_cogs     = make_df(cogs_rows)
+        df_admin    = make_df(admin_rows)
 
         # Totals series for margin calc
-        income_total  = df_income.loc["Total"]  if not df_income.empty  else pd.Series([0]*len(col_labels), index=col_labels)
-        expense_total = df_expenses.loc["Total"] if not df_expenses.empty else pd.Series([0]*len(col_labels), index=col_labels)
+        income_total  = df_turnover.loc["Total"] if not df_turnover.empty else pd.Series([0.0]*len(col_labels), index=col_labels)
+        expense_total = (
+            (df_cogs.loc["Total"]  if not df_cogs.empty  else pd.Series([0.0]*len(col_labels), index=col_labels)) +
+            (df_admin.loc["Total"] if not df_admin.empty else pd.Series([0.0]*len(col_labels), index=col_labels))
+        )
         gp_series = pd.Series(gross_profits, index=col_labels)
         np_series = pd.Series(net_profits,  index=col_labels)
 
@@ -321,29 +332,30 @@ def render_xero():
                 return "color: #2ecc71" if val >= 0 else "color: #e74c3c"
             return ""
 
-        def render_breakdown(df_table, title, cmap):
+        def stacked_bar(df_table, title):
             if df_table.empty:
+                st.info(f"No {title} data found.")
                 return
             st.subheader(title)
-            products = [i for i in df_table.index if i != "Total"]
-            st.dataframe(
-                df_table.style
-                    .format("£{:,.0f}")
-                    .background_gradient(cmap=cmap, subset=pd.IndexSlice[products, col_labels])
-                    .apply(lambda _: ["font-weight:bold; background-color:#1565C0; color:white"] * len(df_table.columns),
-                           subset=pd.IndexSlice[["Total"], :], axis=1),
-                use_container_width=True,
-                height=min(80 + len(df_table) * 35, 500),
-            )
+            accounts = [i for i in df_table.index if i != "Total"]
+            try:
+                dt_idx = pd.to_datetime(col_labels, format="%b %Y")
+            except Exception:
+                dt_idx = col_labels
+            chart_df = df_table.loc[accounts].T.copy()
+            chart_df.index = dt_idx
+            st.bar_chart(chart_df, use_container_width=True, stack=True)
 
-        render_breakdown(df_income,   "Income by account / month",   "Blues")
-        render_breakdown(df_expenses, "Expenses by account / month", "Reds")
+        stacked_bar(df_turnover, "Turnover")
+        stacked_bar(df_cogs,     "Cost of Sales")
+        stacked_bar(df_admin,    "Administrative Costs")
 
         # ── Summary comparison table ──────────────────────────────────────────
         st.subheader("Monthly summary")
         df_summary = pd.DataFrame({
-            "Income":       income_total.values,
-            "Expenses":     expense_total.values,
+            "Turnover":     income_total.values,
+            "Cost of Sales": (df_cogs.loc["Total"] if not df_cogs.empty else pd.Series([0.0]*len(col_labels), index=col_labels)).values,
+            "Admin Costs":  (df_admin.loc["Total"] if not df_admin.empty else pd.Series([0.0]*len(col_labels), index=col_labels)).values,
             "Gross Profit": gross_profits,
             "Net Profit":   net_profits,
         }, index=col_labels)
@@ -353,8 +365,8 @@ def render_xero():
             df_summary.style
                 .format("£{:,.0f}")
                 .map(colour_profit, subset=["Gross Profit", "Net Profit"])
-                .background_gradient(cmap="Blues",  subset=["Income"])
-                .background_gradient(cmap="Reds",   subset=["Expenses"]),
+                .background_gradient(cmap="Blues", subset=["Turnover"])
+                .background_gradient(cmap="Reds",  subset=["Cost of Sales", "Admin Costs"]),
             use_container_width=True,
             height=min(80 + len(df_summary) * 35, 500),
         )
