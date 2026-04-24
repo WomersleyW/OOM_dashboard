@@ -364,7 +364,8 @@ def render_xero():
                 .encode(
                     x=alt.X("Month:O", title=None,
                              sort=col_labels,
-                             axis=alt.Axis(labelAngle=-45)),
+                             axis=alt.Axis(labelAngle=-45, labelOverlap=False,
+                                           labelLimit=200)),
                     y=alt.Y("Amount:Q", title="£", stack=True),
                     color=alt.Color("Account:N"),
                     tooltip=["Month:O", "Account:N", alt.Tooltip("Amount:Q", format="£,.0f")],
