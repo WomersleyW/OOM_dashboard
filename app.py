@@ -344,41 +344,19 @@ def render_xero():
                 return "color: #2ecc71" if val >= 0 else "color: #e74c3c"
             return ""
 
-        import altair as alt
-
         def stacked_bar(df_table, title):
             if df_table.empty:
                 st.info(f"No {title} data found.")
                 return
             st.subheader(title)
             accounts = [i for i in df_table.index if i != "Total"]
+            try:
+                dt_idx = pd.to_datetime(col_labels, format="%b %Y")
+            except Exception:
+                dt_idx = col_labels
             chart_df = df_table.loc[accounts].T.copy()
-            chart_df.index = col_labels
-            chart_df.index.name = "Month"
-            long_df = chart_df.reset_index().melt(id_vars="Month", var_name="Account", value_name="Amount")
-            long_df["Amount"] = pd.to_numeric(long_df["Amount"], errors="coerce").fillna(0)
-            bar_width = max(15, min(50, 400 // max(len(col_labels), 1)))
-            chart = (
-                alt.Chart(long_df)
-                .mark_bar(size=bar_width)
-                .encode(
-                    x=alt.X("Month:O", title=None,
-                             sort=col_labels,
-                             axis=alt.Axis(labelAngle=-45, labelOverlap=False,
-                                           labelLimit=200)),
-                    y=alt.Y("Amount:Q", title="£", stack=True),
-                    color=alt.Color("Account:N"),
-                    tooltip=["Month:O", "Account:N", alt.Tooltip("Amount:Q", format="£,.0f")],
-                )
-                .properties(height=300)
-            )
-            st.altair_chart(chart, use_container_width=True)
-
-        with st.expander("Debug: raw data"):
-            st.write("Turnover rows:", turnover_rows)
-            st.write("COGS rows:", cogs_rows)
-            st.write("Admin rows:", admin_rows)
-            st.write("col_labels:", col_labels)
+            chart_df.index = dt_idx
+            st.bar_chart(chart_df, use_container_width=True, stack=True)
 
         stacked_bar(df_turnover, "Turnover")
         stacked_bar(df_cogs,     "Cost of Sales")
