@@ -535,10 +535,11 @@ def render_combined():
         use_container_width=True,
         height=185,
     )
-    # chart built from same df_ch so values match the table exactly
     dt_idx_ch  = pd.to_datetime(all_months)
-    channel_df = df_ch.loc[["Shopify", "Faire", "Xero"], ch_labels].T.copy()
-    channel_df.index = dt_idx_ch
+    channel_df = pd.DataFrame(
+        {ch: [ch_units[ch].get(m, 0) for m in all_months] for ch in ("Shopify", "Faire", "Xero")},
+        index=dt_idx_ch,
+    )
     st.bar_chart(channel_df, use_container_width=True, stack=False)
 
     # ── Line chart: average unit price by channel ─────────────────────────────
