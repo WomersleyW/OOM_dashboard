@@ -413,6 +413,12 @@ def render_combined():
     st.subheader("Combined sales by product / month")
     st.caption("Shopify (direct) + Faire ÷ 12 + Xero CLF ÷ 12")
 
+    c1, c2 = st.columns(2)
+    with c1:
+        clf_from = st.date_input("Xero CLF from", value=datetime(2025, 1, 1), key="clf_from")
+    with c2:
+        clf_to = st.date_input("Xero CLF to", value=datetime.today(), key="clf_to")
+
     # ── Build unified data structure ───────────────────────────────────────────
     combined = defaultdict(lambda: defaultdict(lambda: {
         "shopify": 0.0, "faire": 0.0, "xero_clf": 0.0
@@ -429,9 +435,9 @@ def render_combined():
             combined[product][month]["faire"] += vals["units"] / 12
 
     if xero.is_authenticated():
-        with st.spinner("Fetching Xero CLF invoices…"):
+        with st.spinner("Fetching Xero CLF Sales by Item… (one call per month)"):
             try:
-                clf_data = xero.get_clf_sales_by_month()
+                clf_data = xero.get_clf_sales_by_item_monthly(str(clf_from), str(clf_to))
                 for product, months in clf_data.items():
                     normalised = next(
                         (k for k in PRODUCT_ALIASES_MAP

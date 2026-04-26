@@ -161,26 +161,67 @@ class XeroClient:
                                     "order": "Date DESC"})
         return r.get("Invoices", []) if r else []
 
-    def get_clf_sales_by_month(self) -> Dict[str, Dict[str, Dict]]:
+    def get_sales_by_item(self, from_date: str, to_date: str) -> Optional[Dict]:
+        """Fetch the Sales by Item report for the given date range."""
+        return self._get("Reports/SalesByItem", {
+            "fromDate": from_date,
+            "toDate":   to_date,
+        })
+
+    def get_clf_sales_by_item_monthly(self, from_date: str, to_date: str) -> Dict[str, Dict[str, Dict]]:
         """
-        Fetch all paid invoices and return {product: {YYYY-MM: {units, revenue}}}
-        for any line item whose description contains 'CLF' (case-insensitive).
+        Return {product: {YYYY-MM: {units, revenue}}} for any item whose
+        code or description contains 'CLF', from the Sales by Item report,
+        one call per calendar month.
         """
+        from datetime import date
+        import calendar
         from collections import defaultdict
+
+        start = date.fromisoformat(from_date)
+        end   = date.fromisoformat(to_date)
         data: Dict = defaultdict(lambda: defaultdict(lambda: {"units": 0.0, "revenue": 0.0}))
-        invoices = self.get_all_invoices(status="PAID")
-        for inv in invoices:
-            date_str = inv.get("DateString", inv.get("Date", ""))[:7]  # YYYY-MM
-            if not date_str or len(date_str) < 7:
-                continue
-            for line in inv.get("LineItems", []):
-                desc = line.get("Description", "") or ""
-                if "clf" in desc.lower():
-                    product = desc.strip()
-                    qty = float(line.get("Quantity", 0) or 0)
-                    rev = float(line.get("LineAmount", 0) or 0)
-                    data[product][date_str]["units"]   += qty
-                    data[product][date_str]["revenue"] += rev
+
+        year, month = start.year, start.month
+        while date(year, month, 1) <= end:
+            last_day  = calendar.monthrange(year, month)[1]
+            m_start   = date(year, month, 1).isoformat()
+            m_end     = date(year, month, last_day).isoformat()
+            month_key = f"{year:04d}-{month:02d}"
+
+            report = self.get_sales_by_item(m_start, m_end)
+            if report:
+                rpt = report.get("Reports", [{}])[0]
+                for section in rpt.get("Rows", []):
+                    rows = (section.get("Rows", [])
+                            if section.get("RowType") == "Section"
+                            else [section])
+                    for r in rows:
+                        if r.get("RowType") != "Row":
+                            continue
+                        cells = r.get("Cells", [])
+                        if len(cells) < 3:
+                            continue
+                        item_code   = cells[0].get("Value", "") or ""
+                        description = cells[1].get("Value", "") or ""
+                        if "clf" not in item_code.lower() and "clf" not in description.lower():
+                            continue
+                        def _f(c):
+                            try:
+                                return float((c.get("Value", "0") or "0").replace(",", ""))
+                            except ValueError:
+                                return 0.0
+                        qty    = _f(cells[2])
+                        amount = _f(cells[4]) if len(cells) > 4 else 0.0
+                        product = description.strip() or item_code.strip()
+                        data[product][month_key]["units"]   += qty
+                        data[product][month_key]["revenue"] += amount
+
+            month += 1
+            if month > 12:
+                month, year = 1, year + 1
+            time.sleep(0.4)
+
         return data
 
     def get_all_invoices(self, status: str = "AUTHORISED") -> List[Dict]:
