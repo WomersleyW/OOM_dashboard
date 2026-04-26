@@ -425,35 +425,44 @@ def render_combined():
         "faire":   0.0, "faire_rev":   0.0,
         "xero":    0.0, "xero_rev":    0.0,
     }))
+    # channel totals accumulated separately to avoid defaultdict access artefacts
+    ch_units = {"Shopify": defaultdict(float), "Faire": defaultdict(float), "Xero": defaultdict(float)}
+    ch_rev   = {"Shopify": defaultdict(float), "Faire": defaultdict(float), "Xero": defaultdict(float)}
 
     shopify_data = sales_by_product_by_month(normal_orders)
-    for product, months in shopify_data.items():
-        for month, vals in months.items():
+    for product, mdata in shopify_data.items():
+        for month, vals in mdata.items():
             combined[product][month]["shopify"]     += vals["units"]
             combined[product][month]["shopify_rev"] += vals["revenue"]
+            ch_units["Shopify"][month] += vals["units"]
+            ch_rev["Shopify"][month]   += vals["revenue"]
 
     faire_data = sales_by_product_by_month(faire_orders)
-    for product, months in faire_data.items():
-        for month, vals in months.items():
+    for product, mdata in faire_data.items():
+        for month, vals in mdata.items():
             combined[product][month]["faire"]     += vals["units"]   / 12
             combined[product][month]["faire_rev"] += vals["revenue"] / 12
+            ch_units["Faire"][month] += vals["units"]   / 12
+            ch_rev["Faire"][month]   += vals["revenue"] / 12
 
     if xero.is_authenticated():
         with st.spinner("Fetching Xero invoice sales…"):
             try:
                 xero_data = xero.get_invoice_sales_monthly(str(clf_from), str(clf_to))
-                for raw_product, months in xero_data.items():
+                for raw_product, mdata in xero_data.items():
                     n = raw_product.lower()
                     if   "focus"   in n: canonical = "OOM Focus"
                     elif "balance" in n: canonical = "OOM Balance"
                     elif "calm"    in n: canonical = "OOM Calm"
                     elif "mix"     in n: canonical = "OOM Mix"
                     else: continue
-                    is_clf  = "clf" in n or any(v.get("clf") for v in months.values())
+                    is_clf  = "clf" in n or any(v.get("clf") for v in mdata.values())
                     divisor = 12 if is_clf else 1
-                    for month, vals in months.items():
+                    for month, vals in mdata.items():
                         combined[canonical][month]["xero"]     += vals["units"]   / divisor
                         combined[canonical][month]["xero_rev"] += vals["revenue"] / divisor
+                        ch_units["Xero"][month] += vals["units"]   / divisor
+                        ch_rev["Xero"][month]   += vals["revenue"] / divisor
             except Exception as e:
                 st.warning(f"Could not load Xero data: {e}")
     else:
@@ -509,27 +518,24 @@ def render_combined():
 
     # ── Bar chart: units by channel ───────────────────────────────────────────
     st.subheader("Units by channel / month")
-    dt_idx = pd.to_datetime(months)
+    all_months = sorted({m for ch in ch_units.values() for m in ch})
+    dt_idx_ch  = pd.to_datetime(all_months)
     channel_df = pd.DataFrame({
-        "Shopify": [sum(combined[p][m]["shopify"] for p in products) for m in months],
-        "Faire":   [sum(combined[p][m]["faire"]   for p in products) for m in months],
-        "Xero":    [sum(combined[p][m]["xero"]    for p in products) for m in months],
-    }, index=dt_idx)
+        "Shopify": [ch_units["Shopify"].get(m, 0) for m in all_months],
+        "Faire":   [ch_units["Faire"].get(m, 0)   for m in all_months],
+        "Xero":    [ch_units["Xero"].get(m, 0)    for m in all_months],
+    }, index=dt_idx_ch)
     st.bar_chart(channel_df, use_container_width=True, stack=False)
 
     # ── Line chart: average unit price by channel ─────────────────────────────
     st.subheader("Average unit price by channel / month (£)")
     avg_rows = {"Shopify": [], "Faire": [], "Xero": []}
-    for m in months:
-        for ch, uk, rk in [
-            ("Shopify", "shopify", "shopify_rev"),
-            ("Faire",   "faire",   "faire_rev"),
-            ("Xero",    "xero",    "xero_rev"),
-        ]:
-            u = sum(combined[p][m][uk] for p in products)
-            r = sum(combined[p][m][rk] for p in products)
-            avg_rows[ch].append(r / u if u else None)
-    avg_df = pd.DataFrame(avg_rows, index=dt_idx)
+    for m in all_months:
+        for ch in ("Shopify", "Faire", "Xero"):
+            u = ch_units[ch].get(m, 0)
+            r = ch_rev[ch].get(m, 0)
+            avg_rows[ch].append(r / u / 12 if u else None)
+    avg_df = pd.DataFrame(avg_rows, index=dt_idx_ch)
     st.line_chart(avg_df, use_container_width=True)
 
 
