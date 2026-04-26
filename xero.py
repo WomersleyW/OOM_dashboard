@@ -198,6 +198,10 @@ class XeroClient:
                 rev = float(line.get("LineAmount") or 0)
                 data[product][date_str]["units"]   += qty
                 data[product][date_str]["revenue"] += rev
+                # flag if either the description or item code contains CLF
+                if "clf" in (line.get("ItemCode") or "").lower() or \
+                   "clf" in (line.get("Description") or "").lower():
+                    data[product][date_str]["clf"] = True
 
         return data
 

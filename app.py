@@ -445,7 +445,8 @@ def render_combined():
                     elif "calm"    in n: canonical = "OOM Calm"
                     elif "mix"     in n: canonical = "OOM Mix"
                     else: continue
-                    divisor = 12 if "clf" in n else 1
+                    is_clf  = "clf" in n or any(v.get("clf") for v in months.values())
+                    divisor = 12 if is_clf else 1
                     for month, vals in months.items():
                         combined[canonical][month]["xero_clf"] += vals["units"] / divisor
             except Exception as e:
