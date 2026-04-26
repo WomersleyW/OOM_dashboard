@@ -411,7 +411,7 @@ def render_xero():
 
 def render_combined():
     st.subheader("Combined sales by product / month")
-    st.caption("Shopify (direct) + Faire ÷ 12 + Xero CLF ÷ 12")
+    st.caption("Shopify (direct) + Faire ÷ 12 + Xero invoices ÷ 12  ·  Xero items matched by product name (Focus / Balance / Calm / Mix)")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -435,20 +435,22 @@ def render_combined():
             combined[product][month]["faire"] += vals["units"] / 12
 
     if xero.is_authenticated():
-        with st.spinner("Fetching Xero CLF Sales by Item… (one call per month)"):
+        with st.spinner("Fetching Xero invoice sales…"):
             try:
-                clf_data = xero.get_clf_sales_by_item_monthly(str(clf_from), str(clf_to))
-                for product, months in clf_data.items():
-                    normalised = next(
-                        (k for k in PRODUCT_ALIASES_MAP
-                         if k.lower() in product.lower()), product
-                    )
+                xero_data = xero.get_invoice_sales_monthly(str(clf_from), str(clf_to))
+                for raw_product, months in xero_data.items():
+                    n = raw_product.lower()
+                    if "focus"   in n: canonical = "OOM Focus"
+                    elif "balance" in n: canonical = "OOM Balance"
+                    elif "calm"    in n: canonical = "OOM Calm"
+                    elif "mix"     in n: canonical = "OOM Mix"
+                    else: continue
                     for month, vals in months.items():
-                        combined[normalised][month]["xero_clf"] += vals["units"] / 12
+                        combined[canonical][month]["xero_clf"] += vals["units"] / 12
             except Exception as e:
-                st.warning(f"Could not load Xero CLF data: {e}")
+                st.warning(f"Could not load Xero data: {e}")
     else:
-        st.info("Connect Xero in the Xero tab to include CLF invoice data.")
+        st.info("Connect Xero in the Xero tab to include invoice data.")
 
     if not combined:
         st.info("No sales data found.")

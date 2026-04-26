@@ -161,11 +161,10 @@ class XeroClient:
                                     "order": "Date DESC"})
         return r.get("Invoices", []) if r else []
 
-    def get_clf_sales_by_item_monthly(self, from_date: str, to_date: str) -> Dict[str, Dict[str, Dict]]:
+    def get_invoice_sales_monthly(self, from_date: str, to_date: str) -> Dict[str, Dict[str, Dict]]:
         """
-        Return {product: {YYYY-MM: {units, revenue}}} for CLF items,
-        derived from PAID invoices filtered to the given date range.
-        Checks both ItemCode and Description for 'clf' (case-insensitive).
+        Return {raw_item_name: {YYYY-MM: {units, revenue}}} for all line items
+        on PAID invoices in the given date range.
         """
         from collections import defaultdict
         data: Dict = defaultdict(lambda: defaultdict(lambda: {"units": 0.0, "revenue": 0.0}))
@@ -192,11 +191,9 @@ class XeroClient:
             if not date_str or len(date_str) < 7:
                 continue
             for line in inv.get("LineItems", []):
-                item_code   = (line.get("ItemCode")    or "").lower()
-                description = (line.get("Description") or "").lower()
-                if "clf" not in item_code and "clf" not in description:
-                    continue
                 product = (line.get("Description") or line.get("ItemCode") or "").strip()
+                if not product:
+                    continue
                 qty = float(line.get("Quantity")   or 0)
                 rev = float(line.get("LineAmount") or 0)
                 data[product][date_str]["units"]   += qty
