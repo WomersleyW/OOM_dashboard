@@ -516,19 +516,10 @@ def render_combined():
     chart_df = pd.DataFrame(rows, index=pd.to_datetime(months))
     st.bar_chart(chart_df, use_container_width=True, stack=True)
 
-    # ── Bar chart: units by channel ───────────────────────────────────────────
+    # ── Table + bar chart: units by channel ──────────────────────────────────
     st.subheader("Units by channel / month")
     all_months = sorted({m for ch in ch_units.values() for m in ch})
-    dt_idx_ch  = pd.to_datetime(all_months)
-    channel_df = pd.DataFrame({
-        "Shopify": [ch_units["Shopify"].get(m, 0) for m in all_months],
-        "Faire":   [ch_units["Faire"].get(m, 0)   for m in all_months],
-        "Xero":    [ch_units["Xero"].get(m, 0)    for m in all_months],
-    }, index=dt_idx_ch)
-    st.bar_chart(channel_df, use_container_width=True, stack=False)
-
-    # ── Table: units by channel ───────────────────────────────────────────────
-    ch_labels = [datetime.strptime(m, "%Y-%m").strftime("%b %Y") for m in all_months]
+    ch_labels  = [datetime.strptime(m, "%Y-%m").strftime("%b %Y") for m in all_months]
     df_ch = pd.DataFrame({
         "Shopify": [ch_units["Shopify"].get(m, 0) for m in all_months],
         "Faire":   [ch_units["Faire"].get(m, 0)   for m in all_months],
@@ -544,6 +535,11 @@ def render_combined():
         use_container_width=True,
         height=185,
     )
+    # chart built from same df_ch so values match the table exactly
+    dt_idx_ch  = pd.to_datetime(all_months)
+    channel_df = df_ch.loc[["Shopify", "Faire", "Xero"], ch_labels].T.copy()
+    channel_df.index = dt_idx_ch
+    st.bar_chart(channel_df, use_container_width=True, stack=False)
 
     # ── Line chart: average unit price by channel ─────────────────────────────
     st.subheader("Average unit price by channel / month (£)")
