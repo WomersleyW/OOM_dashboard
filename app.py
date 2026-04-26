@@ -527,6 +527,24 @@ def render_combined():
     }, index=dt_idx_ch)
     st.bar_chart(channel_df, use_container_width=True, stack=False)
 
+    # ── Table: units by channel ───────────────────────────────────────────────
+    ch_labels = [datetime.strptime(m, "%Y-%m").strftime("%b %Y") for m in all_months]
+    df_ch = pd.DataFrame({
+        "Shopify": [ch_units["Shopify"].get(m, 0) for m in all_months],
+        "Faire":   [ch_units["Faire"].get(m, 0)   for m in all_months],
+        "Xero":    [ch_units["Xero"].get(m, 0)    for m in all_months],
+    }, index=ch_labels).T
+    df_ch["Total"] = df_ch.sum(axis=1)
+    df_ch.loc["Total"] = df_ch.sum()
+    st.dataframe(
+        df_ch.style
+            .format("{:.1f}")
+            .apply(highlight_total, axis=None)
+            .background_gradient(cmap="Blues", subset=pd.IndexSlice[["Shopify", "Faire", "Xero"], ch_labels]),
+        use_container_width=True,
+        height=185,
+    )
+
     # ── Line chart: average unit price by channel ─────────────────────────────
     st.subheader("Average unit price by channel / month (£)")
     avg_rows = {"Shopify": [], "Faire": [], "Xero": [], "Total": []}
