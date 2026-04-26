@@ -529,12 +529,15 @@ def render_combined():
 
     # ── Line chart: average unit price by channel ─────────────────────────────
     st.subheader("Average unit price by channel / month (£)")
-    avg_rows = {"Shopify": [], "Faire": [], "Xero": []}
+    avg_rows = {"Shopify": [], "Faire": [], "Xero": [], "Total": []}
     for m in all_months:
         for ch in ("Shopify", "Faire", "Xero"):
             u = ch_units[ch].get(m, 0)
             r = ch_rev[ch].get(m, 0)
             avg_rows[ch].append(r / u / 12 if u else None)
+        total_u = sum(ch_units[ch].get(m, 0) for ch in ("Shopify", "Faire", "Xero"))
+        total_r = sum(ch_rev[ch].get(m, 0)   for ch in ("Shopify", "Faire", "Xero"))
+        avg_rows["Total"].append(total_r / total_u / 12 if total_u else None)
     avg_df = pd.DataFrame(avg_rows, index=dt_idx_ch)
     st.line_chart(avg_df, use_container_width=True)
 
