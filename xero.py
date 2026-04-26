@@ -161,6 +161,28 @@ class XeroClient:
                                     "order": "Date DESC"})
         return r.get("Invoices", []) if r else []
 
+    def get_clf_sales_by_month(self) -> Dict[str, Dict[str, Dict]]:
+        """
+        Fetch all paid invoices and return {product: {YYYY-MM: {units, revenue}}}
+        for any line item whose description contains 'CLF' (case-insensitive).
+        """
+        from collections import defaultdict
+        data: Dict = defaultdict(lambda: defaultdict(lambda: {"units": 0.0, "revenue": 0.0}))
+        invoices = self.get_all_invoices(status="PAID")
+        for inv in invoices:
+            date_str = inv.get("DateString", inv.get("Date", ""))[:7]  # YYYY-MM
+            if not date_str or len(date_str) < 7:
+                continue
+            for line in inv.get("LineItems", []):
+                desc = line.get("Description", "") or ""
+                if "clf" in desc.lower():
+                    product = desc.strip()
+                    qty = float(line.get("Quantity", 0) or 0)
+                    rev = float(line.get("LineAmount", 0) or 0)
+                    data[product][date_str]["units"]   += qty
+                    data[product][date_str]["revenue"] += rev
+        return data
+
     def get_all_invoices(self, status: str = "AUTHORISED") -> List[Dict]:
         all_inv, page = [], 1
         while True:

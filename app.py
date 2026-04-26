@@ -5,6 +5,7 @@ OOM Dashboard — Streamlit app
 import os
 import pandas as pd
 import streamlit as st
+from collections import defaultdict
 from shopify import ShopifyClient, sales_by_product_by_month, classify_orders
 from xero import XeroClient
 from datetime import datetime
@@ -406,13 +407,107 @@ def render_xero():
         st.line_chart(df_summary.set_index(dt_index), use_container_width=True)
 
 
+# ── Combined tab ──────────────────────────────────────────────────────────────
+
+def render_combined():
+    st.subheader("Combined sales by product / month")
+    st.caption("Shopify (direct) + Faire ÷ 12 + Xero CLF ÷ 12")
+
+    # ── Build unified data structure ───────────────────────────────────────────
+    combined = defaultdict(lambda: defaultdict(lambda: {
+        "shopify": 0.0, "faire": 0.0, "xero_clf": 0.0
+    }))
+
+    shopify_data = sales_by_product_by_month(normal_orders)
+    for product, months in shopify_data.items():
+        for month, vals in months.items():
+            combined[product][month]["shopify"] += vals["units"]
+
+    faire_data = sales_by_product_by_month(faire_orders)
+    for product, months in faire_data.items():
+        for month, vals in months.items():
+            combined[product][month]["faire"] += vals["units"] / 12
+
+    if xero.is_authenticated():
+        with st.spinner("Fetching Xero CLF invoices…"):
+            try:
+                clf_data = xero.get_clf_sales_by_month()
+                for product, months in clf_data.items():
+                    normalised = next(
+                        (k for k in PRODUCT_ALIASES_MAP
+                         if k.lower() in product.lower()), product
+                    )
+                    for month, vals in months.items():
+                        combined[normalised][month]["xero_clf"] += vals["units"] / 12
+            except Exception as e:
+                st.warning(f"Could not load Xero CLF data: {e}")
+    else:
+        st.info("Connect Xero in the Xero tab to include CLF invoice data.")
+
+    if not combined:
+        st.info("No sales data found.")
+        return
+
+    # ── Build totals DataFrame ─────────────────────────────────────────────────
+    products = sorted(combined.keys())
+    months   = sorted({m for p in combined.values() for m in p})
+    labels   = [datetime.strptime(m, "%Y-%m").strftime("%b %Y") for m in months]
+
+    rows = {}
+    for product in products:
+        rows[product] = [
+            combined[product][m]["shopify"] +
+            combined[product][m]["faire"] +
+            combined[product][m]["xero_clf"]
+            for m in months
+        ]
+
+    df = pd.DataFrame(rows, index=labels).T
+    df["Total"] = df.sum(axis=1)
+    df.loc["Total"] = df.sum()
+
+    st.dataframe(
+        df.style
+            .format("{:.1f}")
+            .apply(highlight_total, axis=None)
+            .background_gradient(cmap="Blues",
+                                  subset=pd.IndexSlice[[p for p in products], labels]),
+        use_container_width=True,
+        height=min(80 + len(df) * 35, 400),
+    )
+
+    # ── Breakdown toggle ───────────────────────────────────────────────────────
+    if st.toggle("Show source breakdown"):
+        for product in products:
+            st.markdown(f"**{product}**")
+            bk = pd.DataFrame({
+                "Shopify":  [combined[product][m]["shopify"]   for m in months],
+                "Faire ÷12":[combined[product][m]["faire"]     for m in months],
+                "Xero ÷12": [combined[product][m]["xero_clf"]  for m in months],
+            }, index=labels).T
+            st.dataframe(bk.style.format("{:.1f}"), use_container_width=True, height=145)
+
+    # ── Bar chart ──────────────────────────────────────────────────────────────
+    st.subheader("Combined units by product / month")
+    chart_df = pd.DataFrame(rows, index=pd.to_datetime(months))
+    st.bar_chart(chart_df, use_container_width=True, stack=True)
+
+
+PRODUCT_ALIASES_MAP = {
+    "OOM Balance": "balance",
+    "OOM Calm":    "calm",
+    "OOM Focus":   "focus",
+    "OOM Mix":     "mix",
+}
+
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     f"Standard orders ({len(normal_orders)})",
     f"Faire ({len(faire_orders)})",
     f"Samples ({len(zero_orders)})",
     "Xero",
+    "Combined",
 ])
 
 with tab1:
@@ -426,4 +521,7 @@ with tab3:
 
 with tab4:
     render_xero()
+
+with tab5:
+    render_combined()
 
