@@ -529,6 +529,7 @@ def render_combined():
                     if   "focus"   in n: canonical = "OOM Focus"
                     elif "balance" in n: canonical = "OOM Balance"
                     elif "calm"    in n: canonical = "OOM Calm"
+                    elif "venus"   in n: canonical = "OOM Calm"
                     elif "mix"     in n: canonical = "OOM Mix"
                     else: continue
                     is_clf  = "clf" in n or any(v.get("clf") for v in mdata.values())
