@@ -18,10 +18,16 @@ st.title("🥤 OOM Sales Dashboard")
 # ── Credentials: st.secrets (Streamlit Cloud) with fallback to .env ───────────
 
 store_url     = st.secrets.get("SHOPIFY_STORE_URL",      os.getenv("SHOPIFY_STORE_URL", ""))
-access_token  = st.secrets.get("SHOPIFY_ACCESS_TOKEN",   os.getenv("SHOPIFY_ACCESS_TOKEN", ""))
 client_id     = st.secrets.get("SHOPIFY_CLIENT_ID",      os.getenv("SHOPIFY_CLIENT_ID", ""))
 client_secret = st.secrets.get("SHOPIFY_CLIENT_SECRET",  os.getenv("SHOPIFY_CLIENT_SECRET", ""))
 redirect_uri  = st.secrets.get("SHOPIFY_REDIRECT_URI",   os.getenv("SHOPIFY_REDIRECT_URI", "http://localhost:8501"))
+
+# Session state token takes priority — set after a successful OAuth exchange
+# and survives reruns within the same session (Streamlit Cloud can't write secrets at runtime)
+access_token = (
+    st.session_state.get("shopify_access_token")
+    or st.secrets.get("SHOPIFY_ACCESS_TOKEN", os.getenv("SHOPIFY_ACCESS_TOKEN", ""))
+)
 
 shopify_oauth = ShopifyOAuth(client_id, client_secret, redirect_uri, shop=store_url)
 
@@ -30,15 +36,16 @@ _qp = st.query_params
 if "code" in _qp and client_id:
     with st.spinner("Connecting to Shopify…"):
         try:
-            shopify_oauth.exchange_code(_qp["code"])
+            data = shopify_oauth.exchange_code(_qp["code"])
             shopify_oauth.save_to_env()
-            # Reload so the rest of the app picks up the new token
+            st.session_state["shopify_access_token"] = shopify_oauth.access_token
             access_token = shopify_oauth.access_token
             st.query_params.clear()
-            st.success("Shopify connected — token saved to .env")
+            st.success(f"Shopify connected ✓  scope: {data.get('scope', '')}")
             st.rerun()
         except Exception as e:
             st.error(f"Shopify OAuth error: {e}")
+            st.query_params.clear()
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
@@ -71,12 +78,22 @@ if time.time() >= st.session_state.next_refresh:
 def _show_shopify_connect():
     st.subheader("Connect to Shopify")
     if not client_id:
-        st.warning("Add `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET` to `.env` to enable OAuth.")
-        st.code("SHOPIFY_CLIENT_ID=your_api_key\nSHOPIFY_CLIENT_SECRET=your_api_secret", language="bash")
+        st.warning("Add `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET` to Streamlit Cloud secrets to enable OAuth.")
+        st.code(
+            "SHOPIFY_CLIENT_ID = \"your_api_key\"\n"
+            "SHOPIFY_CLIENT_SECRET = \"your_api_secret\"\n"
+            "SHOPIFY_REDIRECT_URI = \"https://your-app.streamlit.app/\"",
+            language="toml",
+        )
         return
-    st.markdown("Authorise the dashboard to read your Shopify orders.")
+    if not store_url:
+        st.warning("SHOPIFY_STORE_URL is not set in secrets.")
+        return
     auth_url = shopify_oauth.get_auth_url()
+    st.markdown("Authorise the dashboard to read your Shopify orders.")
     st.link_button("Connect to Shopify", auth_url, type="primary")
+    with st.expander("Debug — authorisation URL"):
+        st.code(auth_url)
 
 if not access_token:
     _show_shopify_connect()
