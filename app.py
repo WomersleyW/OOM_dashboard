@@ -486,7 +486,7 @@ def render_xero():
 
 def render_combined():
     st.subheader("Combined sales by product / month")
-    st.caption("Shopify (direct) + Faire ÷ 12 + Xero invoices (CLF items ÷ 12, all others as units)  ·  matched by Focus / Balance / Calm / Mix")
+    st.caption("Shopify (direct) + Faire ÷ 12 + Xero invoices ÷ 12  ·  matched by Focus / Balance / Calm (incl. Venus) / Mix")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -532,13 +532,11 @@ def render_combined():
                     elif "venus"   in n: canonical = "OOM Calm"
                     elif "mix"     in n: canonical = "OOM Mix"
                     else: continue
-                    is_clf  = "clf" in n or any(v.get("clf") for v in mdata.values())
-                    divisor = 12 if is_clf else 1
                     for month, vals in mdata.items():
-                        combined[canonical][month]["xero"]     += vals["units"]   / divisor
-                        combined[canonical][month]["xero_rev"] += vals["revenue"] / divisor
-                        ch_units["Xero"][month] += vals["units"]   / divisor
-                        ch_rev["Xero"][month]   += vals["revenue"] / divisor
+                        combined[canonical][month]["xero"]     += vals["units"]   / 12
+                        combined[canonical][month]["xero_rev"] += vals["revenue"] / 12
+                        ch_units["Xero"][month] += vals["units"]   / 12
+                        ch_rev["Xero"][month]   += vals["revenue"] / 12
             except Exception as e:
                 st.warning(f"Could not load Xero data: {e}")
     else:
