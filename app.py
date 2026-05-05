@@ -31,9 +31,9 @@ access_token = (
 
 shopify_oauth = ShopifyOAuth(client_id, client_secret, redirect_uri, shop=store_url)
 
-# ── Shopify OAuth callback — ?code=... returned by Shopify after authorisation ─
+# ── Shopify OAuth callback — ?code=...&state=shopify_auth ────────────────────
 _qp = st.query_params
-if "code" in _qp and client_id:
+if "code" in _qp and _qp.get("state") == "shopify_auth" and client_id:
     with st.spinner("Connecting to Shopify…"):
         try:
             data = shopify_oauth.exchange_code(_qp["code"])
@@ -269,9 +269,9 @@ if "xero_access_token" in st.session_state:
         st.session_state["xero_tenant_id"],
     )
 
-# Handle OAuth callback — Xero redirects back with ?code=...
+# Handle OAuth callback — Xero redirects back with ?code=...&state=xero_auth
 params = st.query_params
-if "code" in params and not xero.is_authenticated():
+if "code" in params and params.get("state") == "xero_auth" and not xero.is_authenticated():
     with st.spinner("Connecting to Xero…"):
         try:
             xero.exchange_code(params["code"])
