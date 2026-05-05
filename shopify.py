@@ -8,7 +8,8 @@ import requests
 from collections import defaultdict
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-from dotenv import load_dotenv
+from urllib.parse import urlencode
+from dotenv import load_dotenv, set_key, find_dotenv
 
 load_dotenv()
 
@@ -19,12 +20,26 @@ API_VERSION = "2025-01"
 
 class ShopifyClient:
     def __init__(self, store_url: str = STORE_URL, access_token: str = ACCESS_TOKEN):
+        self._access_token = access_token
         self.base_url = f"https://{store_url}/admin/api/{API_VERSION}"
         self.session = requests.Session()
+        self._apply_token(access_token)
+
+    def _apply_token(self, access_token: str) -> None:
+        self._access_token = access_token
         self.session.headers.update({
             "X-Shopify-Access-Token": access_token,
             "Content-Type": "application/json",
         })
+
+    def _reload_token(self) -> bool:
+        """Re-read SHOPIFY_ACCESS_TOKEN from .env; returns True if the token changed."""
+        load_dotenv(override=True)
+        new_token = os.getenv("SHOPIFY_ACCESS_TOKEN", "")
+        if new_token and new_token != self._access_token:
+            self._apply_token(new_token)
+            return True
+        return False
 
     def _request(self, method: str, endpoint: str, **kwargs) -> Optional[Dict]:
         url = f"{self.base_url}{endpoint}"
@@ -34,6 +49,9 @@ class ShopifyClient:
                 retry_after = float(response.headers.get("Retry-After", 2))
                 time.sleep(retry_after)
                 continue
+            if response.status_code == 401 and attempt == 0:
+                if self._reload_token():
+                    continue
             if not response.ok:
                 print(f"  [{response.status_code}] {method} {endpoint} — {response.text[:120]}")
                 return None
@@ -75,11 +93,16 @@ class ShopifyClient:
             params["created_at_min"] = created_at_min
         all_orders: List[Dict] = []
         url = f"{self.base_url}/orders.json"
+        token_reloaded = False
         while url:
             response = self.session.get(url, params=params)
             if response.status_code == 429:
                 time.sleep(float(response.headers.get("Retry-After", 2)))
                 continue
+            if response.status_code == 401 and not token_reloaded:
+                token_reloaded = True
+                if self._reload_token():
+                    continue
             if not response.ok:
                 raise RuntimeError(f"[{response.status_code}] GET /orders — {response.text[:200]}")
 
@@ -160,6 +183,63 @@ class ShopifyClient:
     def get_smart_collections(self, limit: int = 250) -> List[Dict]:
         r = self.get("/smart_collections.json", params={"limit": min(limit, 250)})
         return r.get("smart_collections", []) if r else []
+
+
+# ── Shopify OAuth 2.0 ─────────────────────────────────────────────────────────
+
+SHOPIFY_SCOPES = "read_orders,read_products"
+
+
+class ShopifyOAuth:
+    """
+    Handles the Shopify OAuth 2.0 authorisation-code flow for custom apps.
+
+    Flow:
+      1. Redirect user to get_auth_url()
+      2. Shopify POSTs back with ?code=...
+      3. Call exchange_code(code) → returns {"access_token": "shpat_...", "scope": "..."}
+      4. Optionally call save_to_env() to persist the token across restarts.
+
+    Shopify offline access tokens never expire, so there is no refresh step.
+    """
+
+    def __init__(self, client_id: str, client_secret: str,
+                 redirect_uri: str, shop: str = ""):
+        self.client_id     = client_id
+        self.client_secret = client_secret
+        self.redirect_uri  = redirect_uri
+        self.shop          = shop  # e.g. "mystore.myshopify.com"
+        self.access_token: Optional[str] = None
+
+    def get_auth_url(self, state: str = "shopify_auth") -> str:
+        params = urlencode({
+            "client_id":    self.client_id,
+            "scope":        SHOPIFY_SCOPES,
+            "redirect_uri": self.redirect_uri,
+            "state":        state,
+        })
+        return f"https://{self.shop}/admin/oauth/authorize?{params}"
+
+    def exchange_code(self, code: str) -> Dict:
+        """POST client_id + client_secret + code to receive the access token."""
+        url = f"https://{self.shop}/admin/oauth/access_token"
+        r = requests.post(url, json={
+            "client_id":     self.client_id,
+            "client_secret": self.client_secret,
+            "code":          code,
+        })
+        r.raise_for_status()
+        data = r.json()
+        self.access_token = data["access_token"]
+        return data
+
+    def save_to_env(self) -> None:
+        """Write access token back to .env so it survives app restarts."""
+        env_file = find_dotenv() or ".env"
+        set_key(env_file, "SHOPIFY_ACCESS_TOKEN", self.access_token)
+
+    def is_authenticated(self) -> bool:
+        return bool(self.access_token)
 
 
 PRODUCT_ALIASES = {

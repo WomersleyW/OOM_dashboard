@@ -3,10 +3,11 @@ OOM Dashboard — Streamlit app
 """
 
 import os
+import time
 import pandas as pd
 import streamlit as st
 from collections import defaultdict
-from shopify import ShopifyClient, sales_by_product_by_month, classify_orders
+from shopify import ShopifyClient, ShopifyOAuth, sales_by_product_by_month, classify_orders
 from xero import XeroClient
 from datetime import datetime
 
@@ -16,30 +17,87 @@ st.title("🥤 OOM Sales Dashboard")
 
 # ── Credentials: st.secrets (Streamlit Cloud) with fallback to .env ───────────
 
-store_url = st.secrets.get("SHOPIFY_STORE_URL", os.getenv("SHOPIFY_STORE_URL", ""))
-access_token = st.secrets.get("SHOPIFY_ACCESS_TOKEN", os.getenv("SHOPIFY_ACCESS_TOKEN", ""))
+store_url     = st.secrets.get("SHOPIFY_STORE_URL",      os.getenv("SHOPIFY_STORE_URL", ""))
+access_token  = st.secrets.get("SHOPIFY_ACCESS_TOKEN",   os.getenv("SHOPIFY_ACCESS_TOKEN", ""))
+client_id     = st.secrets.get("SHOPIFY_CLIENT_ID",      os.getenv("SHOPIFY_CLIENT_ID", ""))
+client_secret = st.secrets.get("SHOPIFY_CLIENT_SECRET",  os.getenv("SHOPIFY_CLIENT_SECRET", ""))
+redirect_uri  = st.secrets.get("SHOPIFY_REDIRECT_URI",   os.getenv("SHOPIFY_REDIRECT_URI", "http://localhost:8501"))
+
+shopify_oauth = ShopifyOAuth(client_id, client_secret, redirect_uri, shop=store_url)
+
+# ── Shopify OAuth callback — ?code=... returned by Shopify after authorisation ─
+_qp = st.query_params
+if "code" in _qp and client_id:
+    with st.spinner("Connecting to Shopify…"):
+        try:
+            shopify_oauth.exchange_code(_qp["code"])
+            shopify_oauth.save_to_env()
+            # Reload so the rest of the app picks up the new token
+            access_token = shopify_oauth.access_token
+            st.query_params.clear()
+            st.success("Shopify connected — token saved to .env")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Shopify OAuth error: {e}")
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
-@st.cache_data(ttl=300)
+AUTO_REFRESH_INTERVAL = 300  # seconds
+
+@st.cache_data(ttl=AUTO_REFRESH_INTERVAL)
 def load_data(_store_url, _access_token):
     client = ShopifyClient(store_url=_store_url, access_token=_access_token)
     return client.get_all_orders(financial_status="any")
 
-if st.button("🔄 Refresh data"):
+# ── Auto-refresh timer ────────────────────────────────────────────────────────
+if "next_refresh" not in st.session_state:
+    st.session_state.next_refresh = time.time() + AUTO_REFRESH_INTERVAL
+
+col_btn, col_timer = st.columns([1, 3])
+with col_btn:
+    if st.button("🔄 Refresh data"):
+        st.cache_data.clear()
+        st.session_state.next_refresh = time.time() + AUTO_REFRESH_INTERVAL
+        st.rerun()
+with col_timer:
+    secs_left = max(0, int(st.session_state.next_refresh - time.time()))
+    st.caption(f"Next auto-refresh in {secs_left // 60}m {secs_left % 60:02d}s")
+
+if time.time() >= st.session_state.next_refresh:
     st.cache_data.clear()
+    st.session_state.next_refresh = time.time() + AUTO_REFRESH_INTERVAL
+    st.rerun()
+
+def _show_shopify_connect():
+    st.subheader("Connect to Shopify")
+    if not client_id:
+        st.warning("Add `SHOPIFY_CLIENT_ID` and `SHOPIFY_CLIENT_SECRET` to `.env` to enable OAuth.")
+        st.code("SHOPIFY_CLIENT_ID=your_api_key\nSHOPIFY_CLIENT_SECRET=your_api_secret", language="bash")
+        return
+    st.markdown("Authorise the dashboard to read your Shopify orders.")
+    auth_url = shopify_oauth.get_auth_url()
+    st.link_button("Connect to Shopify", auth_url, type="primary")
+
+if not access_token:
+    _show_shopify_connect()
+    st.stop()
 
 with st.spinner("Fetching orders from Shopify…"):
     try:
         all_orders = load_data(store_url, access_token)
     except Exception as e:
-        st.error(f"Shopify load error: {e}")
+        if "401" in str(e):
+            st.error("Shopify token invalid or revoked.")
+            _show_shopify_connect()
+        else:
+            st.error(f"Shopify load error: {e}")
         st.stop()
 
 if not all_orders:
     st.error("No orders returned.")
     st.write("Store URL:", store_url or "⚠️ NOT SET")
     st.write("Token:", ("✓ set (" + access_token[:8] + "...)") if access_token else "⚠️ NOT SET")
+    _show_shopify_connect()
     st.stop()
 
 normal_orders, faire_orders, zero_orders = classify_orders(all_orders)
@@ -49,7 +107,7 @@ st.caption(
     f"{len(normal_orders)} standard  ·  "
     f"{len(faire_orders)} Faire  ·  "
     f"{len(zero_orders)} zero-value  ·  "
-    f"refreshes every 5 minutes"
+    f"auto-refreshes every 5 min · token reloads from env on 401"
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
