@@ -223,13 +223,16 @@ class ShopifyOAuth:
     def exchange_code(self, code: str) -> Dict:
         """POST client_id + client_secret + code to receive the access token."""
         url = f"https://{self.shop}/admin/oauth/access_token"
-        r = requests.post(url, json={
+        r = requests.post(url, data={
             "client_id":     self.client_id,
             "client_secret": self.client_secret,
             "code":          code,
         })
-        r.raise_for_status()
+        if not r.ok:
+            raise RuntimeError(f"{r.status_code} {r.reason} — {r.text}")
         data = r.json()
+        if "access_token" not in data:
+            raise RuntimeError(f"No access_token in response: {data}")
         self.access_token = data["access_token"]
         return data
 
