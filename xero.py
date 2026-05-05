@@ -196,12 +196,15 @@ class XeroClient:
                     continue
                 qty = float(line.get("Quantity")   or 0)
                 rev = float(line.get("LineAmount") or 0)
+                is_clf = (
+                    "clf" in (line.get("ItemCode")    or "").lower() or
+                    "clf" in (line.get("Description") or "").lower()
+                )
+                if is_clf:
+                    qty /= 12
+                    rev /= 12
                 data[product][date_str]["units"]   += qty
                 data[product][date_str]["revenue"] += rev
-                # flag if either the description or item code contains CLF
-                if "clf" in (line.get("ItemCode") or "").lower() or \
-                   "clf" in (line.get("Description") or "").lower():
-                    data[product][date_str]["clf"] = True
 
         return data
 
